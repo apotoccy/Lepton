@@ -4,7 +4,7 @@ Compiler and OS for edge AI inference, from 32-bit PCs to modern devices.
 
 ## Current status (October 2026)
 
-- **Compiler:** single IR pipeline (AST → IR → verify → C11); 82/82 compiler
+- **Compiler:** single IR pipeline (AST → IR → verify → C11); 88/88 compiler
   tests pass on scalar and SSE2, plus 13 IR-verifier unit tests.
 - **OS:** 32-bit Multiboot kernel, GRUB ISO, QEMU boot, and an interactive REPL.
 - **Inference:** TinyStories-15M runs from a Multiboot module. The forward pass
@@ -39,7 +39,7 @@ compiler or standard-library code.
 
 ## 🏆 Major Milestones Achieved
 
-- **Compiler:** single IR pipeline, 82/82 tests passing on scalar and SSE2 plus
+- **Compiler:** single IR pipeline, 88/88 tests passing on scalar and SSE2 plus
   13 IR-verifier tests, emitting portable C11.
 - **Bare-Metal AI:** a 15M-parameter TinyStories model on a 2008 Lenovo IdeaPad
   S9 (Intel Atom), with no OS, libc, or Python; reproducible in QEMU and as a
@@ -98,8 +98,10 @@ Math (scalar and `v4f32`):
       (`ptr[[T; N]]`); a bare `[T; N]` parameter is passed as a C struct by
       value, not by reference
 - [x] `matmul4`, `matvec4`, `identity4` in `std/nn/matmul.lp`
-- [ ] Arrays as struct fields (the C typedef generator does not yet scan struct
-      fields, so this currently fails to compile)
+- [x] Arrays as struct fields, arrays of structs, and nested arrays
+- [x] Forward declarations and dependency-ordered C typedefs for aggregates
+- [x] Self-referential structs through pointer fields
+- [x] Tests for by-value arrays and `ptr[[T; N]]` by-reference parameters
 - [ ] Symbolic shapes with const-generic element counts
 - [ ] Batched matmul for attention (`Q @ K^T`); currently inline in the kernel
 - [ ] Autotuned loop order (`i, k, j`) for large matrices
@@ -244,7 +246,7 @@ tensors, not the 15M model label.
 - [x] Add an IR verifier (operand types, terminators, unique C names)
 - [ ] Add a regression test for shadowing; manual tests currently pass for
       `if`/`else` and `for` scopes with differing types
-- [ ] Fix C typedef generation for arrays in struct fields and extern parameters
+- [x] Fix C typedef generation for arrays in struct fields and extern parameters
 - [x] Clean up duplicate definitions and unused imports reported by `pyflakes`
 
 ### 4. OS UX: scrollback, history, and introspection
@@ -277,8 +279,6 @@ The original goal was 32-bit PCs *and* modern devices.
       differently typed array variables cannot be converted element-wise
 - [ ] Compound assignment (`+=`, `-=`, etc.) parses but is not lowered
 - [ ] `raw` blocks parse but are not lowered
-- [ ] Arrays inside struct fields fail to compile because the emitter does not
-      collect the required C typedefs
 - [ ] `vcmpeq`, `vcmple`, `vcmpge` are missing; `vselect` has no SSE2 intrinsic
       path
 - [ ] Vector min/max/comparison helpers are only emitted for `v4f32`, even
@@ -325,8 +325,6 @@ The original goal was 32-bit PCs *and* modern devices.
 - [ ] No automated QEMU/kernel smoke test in CI
 - [ ] No deterministic generation regression test (the first greedy token after
       "Once upon a time" should be 29892)
-- [ ] No negative tests for arrays as struct fields (the construct still fails
-      in the C emitter)
 
 ---
 
@@ -335,6 +333,9 @@ The original goal was 32-bit PCs *and* modern devices.
 - **Scalar-first, then SIMD per target.** Every vector op has a scalar fallback.
 - **Array and vector aggregates use an `e` member.** Element access is `.e[i]`
   on every target, including SSE2 (using unions); structs use named fields.
+- **Aggregate typedefs are dependency-ordered.** Forward declarations cover
+  pointer-only cycles, while by-value struct/array dependencies are
+  topologically sorted; recursive by-value aggregates are rejected.
 - **No libm.** All math is self-contained, enabling freestanding kernels.
   Generated code does not call libm; hosted programs use the host C library.
 - **Heap is dynamically initialized after the model.** Currently this is a

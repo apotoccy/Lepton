@@ -87,18 +87,23 @@ def array_len(t):
 
 
 def array_ctype_name(elem_type, count):
-    """Stable C name for a structurally-typed array: 'lp_arr_f32_16'."""
-    if elem_type[0] == 'prim':
-        inner = elem_type[1]
-    elif elem_type[0] == 'array':
-        inner = array_ctype_name(elem_type[1], elem_type[2])
-    elif elem_type[0] == 'named':
-        inner = elem_type[1]
-    elif elem_type[0] == 'ptr':
-        inner = 'ptr'
-    else:
-        inner = 'unknown'
-    return f"lp_arr_{inner}_{count}"
+    """Stable C name for a structurally-typed array: 'lp_arr_f32_16'.
+
+    Pointer element types include their pointee so that arrays such as
+    [ptr[u8]; 4] and [ptr[f32]; 4] do not collide.
+    """
+    def inner_name(t):
+        if t[0] == 'prim':
+            return t[1]
+        if t[0] == 'named':
+            return t[1]
+        if t[0] == 'array':
+            return array_ctype_name(t[1], t[2])
+        if t[0] == 'ptr':
+            return 'ptr_' + inner_name(t[1])
+        return 'unknown'
+
+    return f"lp_arr_{inner_name(elem_type)}_{count}"
 
 def is_num(t):
     return is_int(t) or is_quant(t) or \

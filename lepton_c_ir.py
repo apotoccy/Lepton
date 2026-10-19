@@ -118,34 +118,9 @@ class CEmitter:
         self.emit(RUNTIME_MATH)
         self.emit()
 
-        for name, fields in self.module.structs.items():
-            self.emit(f"typedef struct {name} {{")
-            self.indent += 1
-            for fname, ftype in fields:
-                self.emit(f"{self.ctype(self.resolve(ftype))} {fname};")
-            self.indent -= 1
-            self.emit(f"}} {name};")
-            self.emit()
+        self.emit_type_definitions()
+        self.emit()
 
-        for name, variants in self.module.enums.items():
-            self.emit("typedef enum {")
-            self.indent += 1
-            self.emit(", ".join(f"{name}_{v}" for v in variants))
-            self.indent -= 1
-            self.emit(f"}} {name};")
-            self.emit()
-            
-        array_types = self.collect_array_types()
-        if array_types:
-            for elem, count in sorted(array_types,
-                                      key=lambda k: (k[1], str(k[0]))):
-                name = array_ctype_name(elem, count)
-                self.emit(f"typedef struct {{ {self.ctype(elem)} "
-                          f"e[{count}]; }} {name};")
-            self.emit()
-
-        self.emit()   # blank line the AST emitter also emits after consts
-        
         for name, (params, ret) in self.module.externs.items():
             r = self.resolve(ret) if ret else ('prim', 'void')
             ps = ", ".join(f"{self.ctype(self.resolve(p[1]))} {p[0]}"
@@ -184,19 +159,33 @@ class CEmitter:
     # -- function bodies ----------------------------------------------------- 
     
     def collect_array_types(self):
-        """Return the set of (elem_type, count) pairs used anywhere."""
+        """Return the set of array type tuples used anywhere.
+
+        Besides function locals and instructions, this scans struct
+        fields, extern signatures, and globals so their C typedefs exist
+        even when no instruction mentions the array directly.
+        """
         seen = set()
 
         def visit(t):
             if t is None:
                 return
             if is_array(t):
-                key = (t[1], t[2])
-                if key not in seen:
-                    seen.add(key)
+                if t not in seen:
+                    seen.add(t)
                     visit(t[1])
             elif t[0] == 'ptr':
                 visit(t[1])
+
+        for fields in self.module.structs.values():
+            for _, ftype in fields:
+                visit(ftype)
+        for params, ret in self.module.externs.values():
+            for _, ptype in params:
+                visit(ptype)
+            visit(ret)
+        for entry in self.module.globals.values():
+            visit(entry[1])
 
         for f in self.module.funcs:
             for _, pt in f.params:
@@ -207,8 +196,107 @@ class CEmitter:
                     visit(getattr(instr, 'type', None))
                     for op in instr.operands():
                         visit(getattr(op, 'type', None))
-        return seen    
-    
+        return seen
+
+    def type_node_for(self, t, nodes):
+        """Map a by-value type to its aggregate-definition node, if any.
+
+        Pointers, enums, primitives, and vectors need no ordering edge:
+        pointers are covered by forward declarations, and enums are
+        emitted before aggregate definitions.
+        """
+        if t is None:
+            return None
+        if is_array(t):
+            return t if t in nodes else None
+        if t[0] == 'named' and t[1] in self.module.structs:
+            node = ('struct', t[1])
+            return node if node in nodes else None
+        return None
+
+    def aggregate_order(self, array_types):
+        """Topologically order struct and array definitions by value.
+
+        A struct containing an array needs the array definition first; an
+        array of structs needs the struct definition first. Pointers do not
+        create an edge because forward declarations cover them.
+        """
+        nodes = set(array_types)
+        for name in self.module.structs:
+            nodes.add(('struct', name))
+        edges = {node: set() for node in nodes}
+
+        for arr in array_types:
+            dep = self.type_node_for(arr[1], nodes)
+            if dep is not None:
+                edges[arr].add(dep)
+
+        for name, fields in self.module.structs.items():
+            node = ('struct', name)
+            for _, ftype in fields:
+                dep = self.type_node_for(ftype, nodes)
+                if dep is not None:
+                    edges[node].add(dep)
+
+        order = []
+        state = {}
+
+        def visit(node):
+            mark = state.get(node, 0)
+            if mark == 1:
+                self.err(f"recursive by-value aggregate type {node!r}; "
+                         f"use a pointer to break the cycle")
+            if mark == 2:
+                return
+            state[node] = 1
+            for dep in sorted(edges[node], key=repr):
+                visit(dep)
+            state[node] = 2
+            order.append(node)
+
+        for node in sorted(nodes, key=repr):
+            visit(node)
+        return order
+
+    def emit_type_definitions(self):
+        array_types = self.collect_array_types()
+        has_aggregates = bool(self.module.structs or array_types)
+
+        # Forward declarations let pointer-only cycles and pointer-to-array
+        # fields refer to a type before its full definition.
+        for name in self.module.structs:
+            self.emit(f"typedef struct {name} {name};")
+        for arr in sorted(array_types,
+                          key=lambda t: array_ctype_name(t[1], t[2])):
+            name = array_ctype_name(arr[1], arr[2])
+            self.emit(f"typedef struct {name} {name};")
+        if has_aggregates:
+            self.emit()
+
+        for name, variants in self.module.enums.items():
+            self.emit("typedef enum {")
+            self.indent += 1
+            self.emit(", ".join(f"{name}_{v}" for v in variants))
+            self.indent -= 1
+            self.emit(f"}} {name};")
+            self.emit()
+
+        for node in self.aggregate_order(array_types):
+            if node[0] == 'array':
+                elem, count = node[1], node[2]
+                name = array_ctype_name(elem, count)
+                self.emit(f"struct {name} {{ {self.ctype(elem)} "
+                          f"e[{count}]; }};")
+            else:
+                name = node[1]
+                self.emit(f"struct {name} {{")
+                self.indent += 1
+                for fname, ftype in self.module.structs[name]:
+                    self.emit(f"{self.ctype(self.resolve(ftype))} {fname};")
+                self.indent -= 1
+                self.emit("};")
+            self.emit()
+
     def emit_fn(self, f):
         r = self.ret_type(f)
         if f.name == 'main' and not f.params:

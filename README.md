@@ -11,7 +11,7 @@ as a GRUB ISO.
 
 ## Status (as of October 2026)
 
-- **Compiler:** 82/82 regression tests pass with both the scalar and x86-64 SSE2
+- **Compiler:** 88/88 regression tests pass with both the scalar and x86-64 SSE2
   targets (`make test`, `make test-sse`), plus 13 IR-verifier unit tests.
 - **Build:** 64-bit and 32-bit userland programs build; the freestanding 32-bit
   kernel builds; the GRUB ISO builds.
@@ -39,6 +39,10 @@ as a GRUB ISO.
   arguments, return values, and struct fields must be assignable to their
   declared types. Numeric conversions and pointer casts are inserted explicitly
   in the IR, and array/vector literals are lowered against their target type.
+- **Aggregate types:** arrays as struct fields, arrays of structs, nested arrays,
+  self-referential structs through pointers, and by-value or pointer-to-array
+  parameters are supported. C typedefs are forward-declared and emitted in
+  dependency order.
 - **Hardware-oriented numerics:** `f16`, `bf16`, fixed-point `q7`/`q15`/`q31`,
   and SIMD vectors (`v2f64`, `v4f32`, `v4i32`, `v8i16`, `v16i8`). `f16`/`bf16`
   use native compiler types where available and portable fallbacks otherwise.
@@ -134,8 +138,8 @@ make test
 make test-sse
 ```
 
-Expected results: `make test` reports `82 passed, 0 failed` and
-`IR verifier: 13 tests passed`; `make test-sse` reports `82 passed, 0 failed`.
+Expected results: `make test` reports `88 passed, 0 failed` and
+`IR verifier: 13 tests passed`; `make test-sse` reports `88 passed, 0 failed`.
 
 ### 2. Build and run a userland program
 
@@ -243,9 +247,8 @@ These are the boundaries of the current implementation, not a wish list; see
   model (TinyStories has no merges), its fixed piece buffers need bounds work,
   and byte-fallback handling is missing.
 - **Compiler gaps.** Compound assignment (`+=`, etc.) parses but is not lowered;
-  `raw` blocks parse but are not lowered; arrays inside struct fields currently
-  fail to compile because the emitter does not generate their C typedefs;
-  `vcmpeq`/`vcmple`/`vcmpge` and an SSE2 `vselect` are missing.
+  `raw` blocks parse but are not lowered; `vcmpeq`/`vcmple`/`vcmpge` and an SSE2
+  `vselect` are missing.
 - **One backend.** Only scalar and x86-64 SSE2 are implemented. There is no
   AVX2, NEON/ARM, LLVM IR, or WASM backend yet.
 
