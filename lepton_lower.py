@@ -24,10 +24,12 @@ from lepton_ir import (
     IRReturn, IRJump, IRCondJump, IRNotImplemented,
 )
 
-from leptonc import CompileError
+from leptonc import CompileError, CompileWarning
 from lepton_types import (is_num, RANK, PRIMS, ts,
                           is_vector, vector_elem, vector_len, vector_of,
-                          is_array, array_elem, array_len)
+                          is_array, array_elem, array_len,
+                          is_lossy_conversion, pointer_view_is_safe,
+                          constant_conversion_is_exact)
 
 
 # Source-level builtin name -> C-level name.
@@ -75,9 +77,11 @@ VEC_BIN_OPS = {
 }
 
 class Lowering:
-    def __init__(self, items, fname):
+    def __init__(self, items, fname, strict_types=False):
         self.items = items
         self.fname = fname
+        self.strict_types = strict_types
+        self.warnings = []
         self.module = IRModule()
         self.func = None
         self.block = None
@@ -96,6 +100,17 @@ class Lowering:
 
     def not_impl(self, msg):
         raise IRNotImplemented(msg)
+
+    def warn(self, msg, pos=None):
+        line, col = pos if pos else (0, 0)
+        self.warnings.append(CompileWarning(msg, line, col, self.fname))
+
+    def conversion_warning(self, src, dst, pos, context, kind):
+        msg = (f"implicit {kind} conversion from '{ts(src)}' to "
+               f"'{ts(dst)}' in {context}")
+        if self.strict_types:
+            self.err(f"{msg}; use an explicit 'as' cast", pos)
+        self.warn(f"{msg}; use 'as' for an explicit conversion", pos)
 
     # -- driver --------------------------------------------------------------
     def lower(self):
@@ -499,10 +514,20 @@ class Lowering:
         if target == ('prim', 'void'):
             self.err(f"{context} cannot have type 'void'", pos)
         if is_num(v.type) and is_num(target):
+            if is_lossy_conversion(v.type, target):
+                exact_const = (isinstance(v, IRConst)
+                               and constant_conversion_is_exact(
+                                   v.value, v.type, target))
+                if not exact_const:
+                    self.conversion_warning(v.type, target, pos, context,
+                                            "lossy numeric")
             tmp = self.func.new_temp(target)
             self.block.add(IRCast(tmp, v, target, pos))
             return tmp
         if v.type[0] == 'ptr' and target[0] == 'ptr':
+            if not pointer_view_is_safe(v.type, target):
+                self.conversion_warning(v.type, target, pos, context,
+                                        "unsafe pointer")
             tmp = self.func.new_temp(target)
             self.block.add(IRCast(tmp, v, target, pos))
             return tmp
@@ -1384,6 +1409,9 @@ def is_int(t):
     return _is_int(t)
 
 
-def lower_module(items, fname):
+def lower_module(items, fname, strict_types=False):
     """Entry point: AST item list -> IRModule."""
-    return Lowering(items, fname).lower()
+    lowering = Lowering(items, fname, strict_types)
+    module = lowering.lower()
+    module.warnings = lowering.warnings
+    return module

@@ -35,6 +35,16 @@ class CompileError(Exception):
         super().__init__(f"{fname}:{line}:{col}: error: {msg}")
 
 
+class CompileWarning:
+    """A non-fatal compiler diagnostic."""
+
+    def __init__(self, msg, line=0, col=0, fname="<input>"):
+        self.msg, self.line, self.col, self.fname = msg, line, col, fname
+
+    def __str__(self):
+        return f"{self.fname}:{self.line}:{self.col}: warning: {self.msg}"
+
+
 # =============================================================================
 #  Lexer
 # =============================================================================
@@ -745,11 +755,13 @@ def flatten_imports(items, fname, search_paths):
             flat.append(it)
     return flat
 
-def compile_to_ir(src, fname, search_paths=None, stats_out=None):
+def compile_to_ir(src, fname, search_paths=None, stats_out=None,
+                  strict_types=False, warnings_out=None):
     """Compile source text to a verified IR module.
 
     Verification runs on every compilation. `stats_out`, when provided,
-    receives the IRStats object for callers that want a summary.
+    receives the IRStats object; `warnings_out` receives conversion
+    diagnostics. `strict_types` turns lossy conversions into errors.
     """
     toks = lex(src, fname)
     items = Parser(toks, fname).parse_program()
@@ -757,14 +769,17 @@ def compile_to_ir(src, fname, search_paths=None, stats_out=None):
         items = flatten_imports(items, fname, search_paths)
     from lepton_lower import lower_module
     from lepton_verify import verify_module
-    module = lower_module(items, fname)
+    module = lower_module(items, fname, strict_types=strict_types)
+    if warnings_out is not None:
+        warnings_out.extend(getattr(module, 'warnings', []))
     stats = verify_module(module, fname)
     if stats_out is not None:
         stats_out.append(stats)
     return module
 
 def compile_source(src, fname, freestanding=False, search_paths=None,
-                   target=None, stats_out=None):
+                   target=None, stats_out=None, strict_types=False,
+                   warnings_out=None):
     """Front-to-back compilation: source text -> C source text.
 
     The pipeline is lex -> parse -> flatten imports -> lower to IR ->
@@ -773,7 +788,9 @@ def compile_source(src, fname, freestanding=False, search_paths=None,
     CompileError from this file.
     """
     from lepton_c_ir import compile_ir
-    module = compile_to_ir(src, fname, search_paths, stats_out=stats_out)
+    module = compile_to_ir(src, fname, search_paths, stats_out=stats_out,
+                           strict_types=strict_types,
+                           warnings_out=warnings_out)
     return compile_ir(module, fname, freestanding, target)
 # deprecated
 #     toks = lex(src, fname)
@@ -809,6 +826,9 @@ def main(argv=None):
     ap.add_argument('--verify-ir', action='store_true',
                     help='print the IR verification summary (verification '
                          'always runs)')
+    ap.add_argument('--strict-types', action='store_true',
+                    help='reject lossy numeric and unsafe pointer '
+                         'conversions instead of warning')
     a = ap.parse_args(argv)
 
     try:
@@ -820,11 +840,16 @@ def main(argv=None):
 
     try:
         stats = []
+        warnings = []
         if a.dump_ir:
             from lepton_ir import render_module
             module = compile_to_ir(
                 src, a.input, search_paths=default_search_paths(),
-                stats_out=stats if a.verify_ir else None)
+                stats_out=stats if a.verify_ir else None,
+                strict_types=a.strict_types,
+                warnings_out=warnings)
+            for warning in warnings:
+                print(warning, file=sys.stderr)
             text = render_module(module)
             if a.verify_ir and stats:
                 print(f"IR verified: {stats[0]}", file=sys.stderr)
@@ -838,7 +863,11 @@ def main(argv=None):
         csrc = compile_source(src, a.input, a.freestanding,
                               search_paths=default_search_paths(),
                               target=a.target,
-                              stats_out=stats if a.verify_ir else None)
+                              stats_out=stats if a.verify_ir else None,
+                              strict_types=a.strict_types,
+                              warnings_out=warnings)
+        for warning in warnings:
+            print(warning, file=sys.stderr)
         if a.verify_ir and stats:
             print(f"IR verified: {stats[0]}", file=sys.stderr)
     except CompileError as e:

@@ -790,7 +790,7 @@ def compile_ir(module, fname, freestanding=False, target=None):
 
 
 def compile_source_ir(src, fname, freestanding=False, search_paths=None,
-                      target=None):
+                      target=None, strict_types=False, warnings_out=None):
     """Full pipeline: source -> AST -> IR -> verify -> C."""
     from leptonc import lex, Parser, flatten_imports
     from lepton_lower import lower_module
@@ -800,6 +800,8 @@ def compile_source_ir(src, fname, freestanding=False, search_paths=None,
     items = Parser(toks, fname).parse_program()
     if search_paths is not None:
         items = flatten_imports(items, fname, search_paths)
-    module = lower_module(items, fname)
+    module = lower_module(items, fname, strict_types=strict_types)
+    if warnings_out is not None:
+        warnings_out.extend(getattr(module, 'warnings', []))
     verify_module(module, fname)
     return compile_ir(module, fname, freestanding, target)

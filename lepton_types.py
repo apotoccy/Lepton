@@ -7,6 +7,9 @@ that Phase 1's numeric work (f16, bf16, q15, SIMD vectors, per-target
 capability tables) has a natural home.
 """
 
+import math
+import struct
+
 PRIMS = {'i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64',
          'f16', 'bf16', 'f32', 'f64',
          'q7', 'q15', 'q31',
@@ -108,6 +111,143 @@ def array_ctype_name(elem_type, count):
 def is_num(t):
     return is_int(t) or is_quant(t) or \
            (t[0] == 'prim' and t[1] in ('f16', 'bf16', 'f32', 'f64'))
+
+
+# Width and signedness for integer primitives. `char` is treated as an
+# 8-bit signed value for conversion diagnostics.
+INT_INFO = {
+    'i8':  (8, True),
+    'i16': (16, True),
+    'i32': (32, True),
+    'i64': (64, True),
+    'u8':  (8, False),
+    'u16': (16, False),
+    'u32': (32, False),
+    'u64': (64, False),
+    'char': (8, True),
+}
+
+FLOAT_NAMES = {'f16', 'bf16', 'f32', 'f64'}
+QUANT_NAMES = {'q7', 'q15', 'q31'}
+
+
+def is_lossy_conversion(src, dst):
+    """True when an implicit numeric conversion can lose information.
+
+    Policy:
+      - integer widening (and unsigned-to-wider-signed) is safe
+      - integer-to-float is permitted without a warning
+      - float-to-integer is always potentially lossy
+      - f32 -> f64, f16/bf16 -> f32/f64 are safe
+      - f64 -> f32/f16/bf16, f32 -> f16/bf16, f16 <-> bf16 are lossy
+      - converting to or from a quantized type is lossy except
+        q7/q15 -> f32, any q -> f64, and identical types
+    """
+    if src == dst or src is None or dst is None:
+        return False
+    if src[0] != 'prim' or dst[0] != 'prim':
+        return False
+    s, d = src[1], dst[1]
+
+    if s in INT_INFO and d in INT_INFO:
+        sbits, ssigned = INT_INFO[s]
+        dbits, dsigned = INT_INFO[d]
+        if ssigned == dsigned:
+            return dbits < sbits
+        if not ssigned and dsigned:
+            return dbits <= sbits
+        return True
+
+    if s in INT_INFO and d in FLOAT_NAMES:
+        return False
+    if s in FLOAT_NAMES and d in INT_INFO:
+        return True
+
+    if s in FLOAT_NAMES and d in FLOAT_NAMES:
+        if d == 'f64':
+            return False
+        if d == 'f32':
+            return s == 'f64'
+        return True
+
+    if s in QUANT_NAMES and d in FLOAT_NAMES:
+        if d == 'f64':
+            return False
+        if d == 'f32':
+            return s == 'q31'
+        return True
+    if s in FLOAT_NAMES and d in QUANT_NAMES:
+        return True
+    if s in INT_INFO and d in QUANT_NAMES:
+        return True
+    if s in QUANT_NAMES and d in INT_INFO:
+        return True
+    if s in QUANT_NAMES and d in QUANT_NAMES:
+        return True
+    return False
+
+
+def constant_conversion_is_exact(value, src, dst):
+    """Whether a constant value survives an otherwise-lossy conversion."""
+    if src is None or dst is None:
+        return False
+    if src[0] != 'prim' or dst[0] != 'prim':
+        return False
+    s, d = src[1], dst[1]
+
+    if s in INT_INFO and d in INT_INFO and isinstance(value, int) \
+            and not isinstance(value, bool):
+        bits, signed = INT_INFO[d]
+        lo = -(1 << (bits - 1)) if signed else 0
+        hi = (1 << (bits - 1)) - 1 if signed else (1 << bits) - 1
+        return lo <= value <= hi
+
+    if s in FLOAT_NAMES and d in INT_INFO and isinstance(value, float):
+        if not math.isfinite(value) or value != int(value):
+            return False
+        bits, signed = INT_INFO[d]
+        lo = -(1 << (bits - 1)) if signed else 0
+        hi = (1 << (bits - 1)) - 1 if signed else (1 << bits) - 1
+        return lo <= int(value) <= hi
+
+    if s in FLOAT_NAMES and d in FLOAT_NAMES:
+        if d == 'f64':
+            return True
+        try:
+            f = float(value)
+            if not math.isfinite(f):
+                return False
+            if d == 'f32':
+                return struct.unpack('<f', struct.pack('<f', f))[0] == f
+            if d == 'f16':
+                return struct.unpack('<e', struct.pack('<e', f))[0] == f
+            if d == 'bf16':
+                bits = int.from_bytes(struct.pack('<f', f), 'little')
+                return (bits & 0xFFFF) == 0
+        except (OverflowError, struct.error):
+            return False
+    return False
+
+
+def pointer_view_is_safe(src, dst):
+    """True for exact pointers and byte/void-buffer views."""
+    if src == dst:
+        return True
+    if src is None or dst is None:
+        return False
+    if src[0] != 'ptr' or dst[0] != 'ptr':
+        return False
+
+    def byte_view(t):
+        inner = t[1]
+        if inner[0] == 'prim' and inner[1] in ('u8', 'char', 'void'):
+            return True
+        if is_array(inner):
+            elem = array_elem(inner)
+            return elem[0] == 'prim' and elem[1] in ('u8', 'char')
+        return False
+
+    return byte_view(src) or byte_view(dst)
 
 
 def ts(t):

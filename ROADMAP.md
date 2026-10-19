@@ -5,7 +5,8 @@ Compiler and OS for edge AI inference, from 32-bit PCs to modern devices.
 ## Current status (October 2026)
 
 - **Compiler:** single IR pipeline (AST → IR → verify → C11); 88/88 compiler
-  tests pass on scalar and SSE2, plus 13 IR-verifier unit tests.
+  tests pass on scalar and SSE2, plus 13 IR-verifier and 12 conversion-policy
+  unit tests.
 - **OS:** 32-bit Multiboot kernel, GRUB ISO, QEMU boot, and an interactive REPL.
 - **Inference:** TinyStories-15M runs from a Multiboot module. The forward pass
   matches an independent reference for position 0 (token 9038) and for a
@@ -40,7 +41,7 @@ compiler or standard-library code.
 ## 🏆 Major Milestones Achieved
 
 - **Compiler:** single IR pipeline, 88/88 tests passing on scalar and SSE2 plus
-  13 IR-verifier tests, emitting portable C11.
+  13 IR-verifier and 12 conversion-policy tests, emitting portable C11.
 - **Bare-Metal AI:** a 15M-parameter TinyStories model on a 2008 Lenovo IdeaPad
   S9 (Intel Atom), with no OS, libc, or Python; reproducible in QEMU and as a
   GRUB ISO.
@@ -66,6 +67,8 @@ compiler or standard-library code.
 - [x] IR verifier: operand/destination types, label and jump validity,
       call signatures, aggregate shapes, and reachable fallthrough
 - [x] Malformed-IR verifier unit tests
+- [x] Conversion policy: lossy numeric and unsafe pointer warnings,
+      constant-aware exactness, `--strict-types`, and unit tests
 - [x] `pyflakes`-clean compiler modules
 - [ ] Remove the remaining commented AST-emitter code and update docstrings
 
@@ -243,6 +246,8 @@ tensors, not the 15M model label.
 - [x] Function arguments and returns: arity and type checking
 - [x] Struct fields and array element types: check and coerce
 - [x] Add negative tests for every new rule
+- [x] Conversion policy: warnings by default, `--strict-types` errors, and
+      tests for numeric/pointer cases
 - [x] Add an IR verifier (operand types, terminators, unique C names)
 - [ ] Add a regression test for shadowing; manual tests currently pass for
       `if`/`else` and `for` scopes with differing types
@@ -272,9 +277,8 @@ The original goal was 32-bit PCs *and* modern devices.
 
 **Compiler and language**
 
-- [ ] Numeric conversions at annotated boundaries are implicit, including
-      narrowing (for example `f64` to `i32`), and pointer-to-pointer casts are
-      allowed for byte-buffer views; there is no lossy-conversion warning
+- [ ] Integer-to-float conversions are permitted without a warning by policy;
+      very wide integers can still lose precision
 - [ ] Untyped array/vector literals still infer a common element type; two
       differently typed array variables cannot be converted element-wise
 - [ ] Compound assignment (`+=`, `-=`, etc.) parses but is not lowered
@@ -336,6 +340,10 @@ The original goal was 32-bit PCs *and* modern devices.
 - **Aggregate typedefs are dependency-ordered.** Forward declarations cover
   pointer-only cycles, while by-value struct/array dependencies are
   topologically sorted; recursive by-value aggregates are rejected.
+- **Conversion diagnostics are warnings by default.** Lossy numeric and unsafe
+  pointer conversions warn with a source span; `--strict-types` turns them into
+  errors. Integer-to-float and byte/void pointer views are allowed without a
+  warning, and exact constants do not warn.
 - **No libm.** All math is self-contained, enabling freestanding kernels.
   Generated code does not call libm; hosted programs use the host C library.
 - **Heap is dynamically initialized after the model.** Currently this is a
