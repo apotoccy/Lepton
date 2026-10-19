@@ -107,6 +107,8 @@ def is_num(t):
 
 def ts(t):
     """Render a type for diagnostics."""
+    if t is None:
+        return 'void'
     if t[0] == 'prim':
         return t[1]
     if t[0] == 'ptr':

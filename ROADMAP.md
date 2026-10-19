@@ -4,8 +4,8 @@ Compiler and OS for edge AI inference, from 32-bit PCs to modern devices.
 
 ## Current status (October 2026)
 
-- **Compiler:** single IR pipeline (AST → IR → C11); 82/82 regression tests pass
-  with the scalar and x86-64 SSE2 targets.
+- **Compiler:** single IR pipeline (AST → IR → verify → C11); 82/82 compiler
+  tests pass on scalar and SSE2, plus 13 IR-verifier unit tests.
 - **OS:** 32-bit Multiboot kernel, GRUB ISO, QEMU boot, and an interactive REPL.
 - **Inference:** TinyStories-15M runs from a Multiboot module. The forward pass
   matches an independent reference for position 0 (token 9038) and for a
@@ -39,8 +39,8 @@ compiler or standard-library code.
 
 ## 🏆 Major Milestones Achieved
 
-- **Compiler:** single IR pipeline, 82/82 tests passing on scalar and SSE2,
-  emitting portable C11.
+- **Compiler:** single IR pipeline, 82/82 tests passing on scalar and SSE2 plus
+  13 IR-verifier tests, emitting portable C11.
 - **Bare-Metal AI:** a 15M-parameter TinyStories model on a 2008 Lenovo IdeaPad
   S9 (Intel Atom), with no OS, libc, or Python; reproducible in QEMU and as a
   GRUB ISO.
@@ -63,6 +63,9 @@ compiler or standard-library code.
       return values, and struct fields
 - [x] Target-typed array and vector literals against annotations
 - [x] Type-error regression tests and clean diagnostics
+- [x] IR verifier: operand/destination types, label and jump validity,
+      call signatures, aggregate shapes, and reachable fallthrough
+- [x] Malformed-IR verifier unit tests
 - [x] `pyflakes`-clean compiler modules
 - [ ] Remove the remaining commented AST-emitter code and update docstrings
 
@@ -238,7 +241,7 @@ tensors, not the 15M model label.
 - [x] Function arguments and returns: arity and type checking
 - [x] Struct fields and array element types: check and coerce
 - [x] Add negative tests for every new rule
-- [ ] Add an IR verifier (operand types, terminators, unique C names)
+- [x] Add an IR verifier (operand types, terminators, unique C names)
 - [ ] Add a regression test for shadowing; manual tests currently pass for
       `if`/`else` and `for` scopes with differing types
 - [ ] Fix C typedef generation for arrays in struct fields and extern parameters
@@ -337,6 +340,8 @@ The original goal was 32-bit PCs *and* modern devices.
 - **Heap is dynamically initialized after the model.** Currently this is a
   fixed 64 MB reservation; memory-map validation is pending.
 - **The IR is flat.** Locals and temporaries are function-scoped and hoisted.
+- **The IR is verified before C emission.** Type, control-flow, and signature
+  invariants are checked after lowering; `--verify-ir` prints a summary.
 - **Runtime helpers are prefixed `lp_`.** User functions are emitted as
   `lp_<name>` except `main` and externs.
 - **Type annotations are contracts.** Locals, assignments, arguments, returns,
@@ -350,7 +355,8 @@ The original goal was 32-bit PCs *and* modern devices.
 ## Notes for Future Sessions
 
 - **Compiler checks:** run `python3 -m pyflakes lepton_*.py leptonc.py` after
-  changes. It is currently clean; keep it that way.
+  changes. It is currently clean; keep it that way. `make test` also runs
+  `tests/test_ir_verify.py`.
 - **Build dependencies:** use `make -B kernel` after touching `lepton_*.py` or
   `std/*.lp`; the Makefile does not track those as kernel dependencies.
 - **Real hardware:** when testing on the Lenovo, always check `[dbg: start]`

@@ -745,26 +745,35 @@ def flatten_imports(items, fname, search_paths):
             flat.append(it)
     return flat
 
-def compile_to_ir(src, fname, search_paths=None):
-    """Compile source text to an IR module. Useful for --dump-ir and
-    other tooling that wants to inspect or transform the IR."""
+def compile_to_ir(src, fname, search_paths=None, stats_out=None):
+    """Compile source text to a verified IR module.
+
+    Verification runs on every compilation. `stats_out`, when provided,
+    receives the IRStats object for callers that want a summary.
+    """
     toks = lex(src, fname)
     items = Parser(toks, fname).parse_program()
     if search_paths is not None:
         items = flatten_imports(items, fname, search_paths)
     from lepton_lower import lower_module
-    return lower_module(items, fname)
+    from lepton_verify import verify_module
+    module = lower_module(items, fname)
+    stats = verify_module(module, fname)
+    if stats_out is not None:
+        stats_out.append(stats)
+    return module
 
 def compile_source(src, fname, freestanding=False, search_paths=None,
-                   target=None):
+                   target=None, stats_out=None):
     """Front-to-back compilation: source text -> C source text.
 
     The pipeline is lex -> parse -> flatten imports -> lower to IR ->
-    emit C. The IR modules are imported lazily to avoid an import cycle:
-    lepton_lower and lepton_c_ir both import CompileError from this file.
+    verify IR -> emit C. The IR modules are imported lazily to avoid an
+    import cycle: lepton_lower, lepton_verify, and lepton_c_ir all import
+    CompileError from this file.
     """
     from lepton_c_ir import compile_ir
-    module = compile_to_ir(src, fname, search_paths)
+    module = compile_to_ir(src, fname, search_paths, stats_out=stats_out)
     return compile_ir(module, fname, freestanding, target)
 # deprecated
 #     toks = lex(src, fname)
@@ -797,6 +806,9 @@ def main(argv=None):
                     help='vector lowering target (default: scalar)')
     ap.add_argument('--dump-ir', action='store_true',
                     help='print the lowered IR instead of compiling')
+    ap.add_argument('--verify-ir', action='store_true',
+                    help='print the IR verification summary (verification '
+                         'always runs)')
     a = ap.parse_args(argv)
 
     try:
@@ -807,11 +819,15 @@ def main(argv=None):
         return 1
 
     try:
+        stats = []
         if a.dump_ir:
             from lepton_ir import render_module
-            module = compile_to_ir(src, a.input,
-                                   search_paths=default_search_paths())
+            module = compile_to_ir(
+                src, a.input, search_paths=default_search_paths(),
+                stats_out=stats if a.verify_ir else None)
             text = render_module(module)
+            if a.verify_ir and stats:
+                print(f"IR verified: {stats[0]}", file=sys.stderr)
             if a.output:
                 with open(a.output, 'w') as f:
                     f.write(text)
@@ -821,7 +837,10 @@ def main(argv=None):
             return 0
         csrc = compile_source(src, a.input, a.freestanding,
                               search_paths=default_search_paths(),
-                              target=a.target)
+                              target=a.target,
+                              stats_out=stats if a.verify_ir else None)
+        if a.verify_ir and stats:
+            print(f"IR verified: {stats[0]}", file=sys.stderr)
     except CompileError as e:
         print(str(e), file=sys.stderr)
         return 1

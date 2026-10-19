@@ -12,7 +12,7 @@ as a GRUB ISO.
 ## Status (as of October 2026)
 
 - **Compiler:** 82/82 regression tests pass with both the scalar and x86-64 SSE2
-  targets (`make test`, `make test-sse`).
+  targets (`make test`, `make test-sse`), plus 13 IR-verifier unit tests.
 - **Build:** 64-bit and 32-bit userland programs build; the freestanding 32-bit
   kernel builds; the GRUB ISO builds.
 - **Boot:** the kernel boots via QEMU `-kernel` and via the ISO `-cdrom` path.
@@ -29,8 +29,12 @@ as a GRUB ISO.
 
 - **Bare-metal AI:** runs a GGUF model directly on the CPU with no underlying OS
   and no ML framework.
-- **Custom compiler pipeline:** lexer/parser → typed flat IR → C11, with source
-  spans and one lowering pipeline.
+- **Custom compiler pipeline:** lexer/parser → typed flat IR → verification →
+  C11, with source spans and one lowering pipeline.
+- **IR verification:** every lowered module is checked for well-typed operands,
+  valid control flow and call signatures, aggregate shapes, and reachable
+  fallthrough before C emission. `python3 leptonc.py file.lp -S --verify-ir`
+  prints a summary.
 - **Enforced declared types:** `let`/`var` annotations, assignments, call
   arguments, return values, and struct fields must be assignable to their
   declared types. Numeric conversions and pointer casts are inserted explicitly
@@ -66,6 +70,7 @@ Lepton/
 ├── leptonc.py              # Driver, lexer, parser
 ├── lepton_ir.py            # Typed IR classes and renderer
 ├── lepton_lower.py         # AST -> IR lowering, scoping, type inference
+├── lepton_verify.py        # IR verification before C emission
 ├── lepton_types.py         # Primitives, vectors, fixed-point, C mappings
 ├── lepton_target.py        # Scalar and x86-64 SSE2 target descriptions
 ├── lepton_c_ir.py          # IR -> C11 emitter
@@ -103,6 +108,7 @@ Lepton/
 ├── tests/
 │   ├── cases/              # Success cases (.lp with .out/.exit)
 │   ├── errors/             # Expected compilation failures
+│   ├── test_ir_verify.py   # Malformed-IR verifier tests
 │   └── run_tests.py        # Test harness (make test)
 │
 ├── tools/                  # Python utilities
@@ -128,7 +134,8 @@ make test
 make test-sse
 ```
 
-Expected result for each: `82 passed, 0 failed`.
+Expected results: `make test` reports `82 passed, 0 failed` and
+`IR verifier: 13 tests passed`; `make test-sse` reports `82 passed, 0 failed`.
 
 ### 2. Build and run a userland program
 
@@ -142,6 +149,12 @@ Or invoke the compiler directly:
 ```bash
 python3 leptonc.py src/hello.lp -o hello
 ./hello
+```
+
+To see the IR verification summary:
+
+```bash
+python3 leptonc.py src/hello.lp -S -o hello.c --verify-ir
 ```
 
 ### 3. Build and run Lepton OS in QEMU
@@ -239,9 +252,10 @@ These are the boundaries of the current implementation, not a wish list; see
 ## Continuous integration
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on pushes and pull
-requests: scalar compiler tests, SSE2 tests, 64-bit and 32-bit userland builds,
-and the freestanding kernel build. It does not run QEMU or inference, because
-the QEMU path requires a GGUF model that is not tracked in Git.
+requests: scalar compiler tests, SSE2 tests, IR-verifier tests, 64-bit and
+32-bit userland builds, and the freestanding kernel build. It does not run QEMU
+or inference, because the QEMU path requires a GGUF model that is not tracked in
+Git.
 
 ## Development history and scratch space
 

@@ -703,13 +703,15 @@ def compile_ir(module, fname, freestanding=False, target=None):
 
 def compile_source_ir(src, fname, freestanding=False, search_paths=None,
                       target=None):
-    """Full pipeline: source -> AST -> IR -> C. Mirrors compile_source()."""
+    """Full pipeline: source -> AST -> IR -> verify -> C."""
     from leptonc import lex, Parser, flatten_imports
     from lepton_lower import lower_module
+    from lepton_verify import verify_module
 
     toks = lex(src, fname)
     items = Parser(toks, fname).parse_program()
     if search_paths is not None:
         items = flatten_imports(items, fname, search_paths)
     module = lower_module(items, fname)
+    verify_module(module, fname)
     return compile_ir(module, fname, freestanding, target)

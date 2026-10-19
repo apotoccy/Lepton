@@ -190,13 +190,18 @@ run-iso: check-m32 $(KERNEL_ISO)
 # ---------------------------------------------------------------------------
 #  Tests
 # ---------------------------------------------------------------------------
-.PHONY: test test-v
+.PHONY: test test-v test-verifier
 
 test:
 	$(PYTHON) tests/run_tests.py
+	$(PYTHON) tests/test_ir_verify.py
+
+test-verifier:
+	$(PYTHON) tests/test_ir_verify.py
 
 test-v:
 	$(PYTHON) tests/run_tests.py -v
+	$(PYTHON) tests/test_ir_verify.py
 	
 .PHONY: test-sse
 
