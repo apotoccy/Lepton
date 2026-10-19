@@ -17,14 +17,17 @@ from __future__ import annotations
 from lepton_ir import (
     IRModule, IRFunc, IRBlock, IRTemp, IRLocal, IRConst,
     IRBind, IRAssign, IRBinOp, IRUnOp, IRCall,
-    IRConcat, IRToString, IRCast, IRStructInit, IRFieldGet,
-    IRVecLit, IRVecIndex,
+    IRConcat, IRToString, IRCast, IRMathOp, IRVecReduce, IRSplat,
+    IRVecBinOp, IRArrayLit, IRArrayIndex, IRArraySet, IRRef, IRAlloc,
+    IRStructInit, IRFieldGet,
+    IRVecLit, IRVecIndex, IRVecSet,
     IRReturn, IRJump, IRCondJump, IRNotImplemented,
 )
 
 from leptonc import CompileError
 from lepton_types import (is_num, RANK, PRIMS, ts,
-                          is_vector, vector_elem, vector_len, vector_of)
+                          is_vector, vector_elem, vector_len, vector_of,
+                          is_array, array_elem, array_len, array_ctype_name)
 
 
 # Source-level builtin name -> C-level name.
@@ -34,6 +37,42 @@ BUILTIN_C_NAMES = {
     'panic':   'lp_panic',
 }
 
+# Source-level math intrinsics. These lower to IRMathOp, not to a C call.
+MATH_INTRINSICS = {'sqrt', 'rsqrt', 'exp', 'tanh', 'erf', 'cos', 'sin'}
+
+# File I/O builtins. Each is a thin wrapper around a runtime helper.
+FILE_BUILTINS = {'file_size', 'read_file_at', 'write_file'}
+
+# Little-endian read builtins. Signature: (buf: ptr[T], offset: int)
+# Return type and C helper name per builtin.
+READ_BUILTINS = {
+    'read_u8':  ('u8',  'lp_rd_u8'),
+    'read_u16': ('u16', 'lp_rd_u16_le'),
+    'read_u32': ('u32', 'lp_rd_u32_le'),
+    'read_u64': ('u64', 'lp_rd_u64_le'),
+    'read_i8':  ('i8',  'lp_rd_i8_le'),
+    'read_i32': ('i32', 'lp_rd_i32_le'),
+    'read_i64': ('i64', 'lp_rd_i64_le'),
+    'read_f16': ('f32', 'lp_rd_f16_le'),
+    'read_f32': ('f32', 'lp_rd_f32_le'),
+}
+
+STRING_BUILTINS = {'read_str'}
+
+# Reductions over a vector. Lower to IRVecReduce, not to a C call.
+VEC_REDUCTIONS = {'sum': 'sum', 'vmax': 'max', 'vmin': 'min'}
+
+# Vector builtins whose argument shape is not the usual one-arg-reduce
+# or one-arg-math pattern. Each entry maps a source name to (op, arity)
+# where op is the IRVecBinOp op and arity is how many positional args
+# the source form takes.
+VEC_BIN_OPS = {
+    'vmax2':   ('vmax2',   2),
+    'vmin2':   ('vmin2',   2),
+    'vcmplt':  ('vcmplt',  2),
+    'vcmpgt':  ('vcmpgt',  2),
+    'vselect': ('vselect', 3),
+}
 
 class Lowering:
     def __init__(self, items, fname):
@@ -44,6 +83,8 @@ class Lowering:
         self.block = None
         self.scopes = []
         self.loop_stack = []
+        self.declared_names = set()
+        self.rename_counter = 0
 
     # -- diagnostics ---------------------------------------------------------
     def err(self, msg, pos=None):
@@ -56,7 +97,14 @@ class Lowering:
 
     # -- driver --------------------------------------------------------------
     def lower(self):
-        # Pass 1: collect signatures and nominal types.
+        # Pass 1a: nominal types first, so resolve_type works below.
+        for it in self.items:
+            if it.kind == 'struct':
+                self.module.structs[it.name] = list(it.fields)
+            elif it.kind == 'enum':
+                self.module.enums[it.name] = list(it.variants)
+
+        # Pass 1b: functions, externs, and constants.
         for it in self.items:
             if it.kind == 'fn':
                 cname = 'main' if it.name == 'main' else 'lp_' + it.name
@@ -68,12 +116,10 @@ class Lowering:
             elif it.kind == 'extern':
                 self.module.externs[it.name] = (
                     [(p.name, p.type) for p in it.params], it.ret)
-            elif it.kind == 'struct':
-                self.module.structs[it.name] = list(it.fields)
-            elif it.kind == 'enum':
-                self.module.enums[it.name] = list(it.variants)
             elif it.kind == 'const':
-                self.module.globals[it.name] = (it.name, it.type)
+                ty = self.resolve_type(it.type, it.pos)
+                val = self.eval_const(it.value, ty)
+                self.module.globals[it.name] = (it.name, ty, val)
             elif it.kind == 'import':
                 self.not_impl("IR: imports must be flattened before lowering")
 
@@ -111,21 +157,65 @@ class Lowering:
             self.err(f"unknown type '{t[1]}'", pos)
         self.err(f"bad type {t!r}", pos)
 
+    def eval_const(self, node, target_type):
+        """Evaluate a constant expression at collect time. Supports
+        literals and casts of literals. Returns an IRConst whose type is
+        `target_type`. Const initializers that reference other consts or
+        call functions are not supported yet."""
+        if node.kind == 'int':
+            return IRConst(node.value, target_type or ('prim', 'i32'))
+        if node.kind == 'float':
+            return IRConst(node.value, target_type or ('prim', 'f64'))
+        if node.kind == 'float32':
+            return IRConst(node.value, target_type or ('prim', 'f32'))
+        if node.kind == 'float16':
+            return IRConst(node.value, target_type or ('prim', 'f16'))
+        if node.kind == 'bool':
+            return IRConst(node.value, target_type or ('prim', 'bool'))
+        if node.kind == 'charlit':
+            return IRConst(node.value, target_type or ('prim', 'char'))
+        if node.kind == 'cast':
+            inner = self.eval_const(node.expr, None)
+            return IRConst(inner.value, target_type)
+        self.err("const initializer must be a literal or a cast of a literal",
+                 node.pos)
+
     def pop_scope(self):
         self.scopes.pop()
 
     def declare(self, name, type):
-        self.scopes[-1][name] = type
+        """Declare `name` in the current scope. Returns the C-level name
+        (equal to `name` if no shadowing occurred, otherwise `name_N`)."""
+        cname = name
+        if name in self.declared_names:
+            while True:
+                self.rename_counter += 1
+                cname = f"{name}_{self.rename_counter}"
+                if cname not in self.declared_names:
+                    break
+        self.declared_names.add(cname)
+        self.scopes[-1][name] = (cname, type)
+        return cname
 
     def lookup(self, name):
+        """Return (cname, type) for the innermost binding of `name`,
+        or None if not found."""
         for scope in reversed(self.scopes):
             if name in scope:
                 return scope[name]
         return None
+
     # -- functions -----------------------------------------------------------
     def lower_fn(self, it, f):
         self.func = f
-        self.scopes = [{p[0]: p[1] for p in f.params}]
+        self.declared_names = set()
+        self.rename_counter = 0
+        self.scopes = [{}]
+        for pname, ptype in f.params:
+            # Params keep their source names but count toward declared_names
+            # so a `let` in the body that shadows them gets renamed.
+            self.scopes[0][pname] = (pname, ptype)
+            self.declared_names.add(pname)
         self.loop_stack = []
         self.block = f.add_block('entry', it.pos)
         for s in it.body.stmts:
@@ -135,9 +225,6 @@ class Lowering:
                 self.block.add(IRReturn(IRConst(0, ('prim', 'i32')), it.pos))
             else:
                 self.block.add(IRReturn(None, it.pos))
-                
-                
-                
 
     # -- statements ----------------------------------------------------------
     def lower_stmt(self, s):
@@ -168,26 +255,73 @@ class Lowering:
 
         if k == 'let':
             if s.value is None:
-                self.not_impl("IR: `let` without initialiser")
+                if s.type is None:
+                    self.err("'let' needs a type or an initialiser", s.pos)
+                t = self.resolve_type(s.type, s.pos)
+                if not (is_array(t) or t[0] == 'named'):
+                    self.err(f"'{ts(t)}' needs an initialiser", s.pos)
+                placeholder = IRConst(0, t)
+                cname = self.declare(s.name, t)
+                self.block.add(IRBind(cname, placeholder, t,
+                                      s.mutable, s.pos))
+                return
             if s.type is not None:
                 self.resolve_type(s.type, s.pos)
             v = self.lower_expr(s.value)
             if v is None:
                 self.err("cannot bind a void expression to a name", s.pos)
-            self.block.add(IRBind(s.name, v, v.type, s.mutable, s.pos))
-            self.declare(s.name, v.type)
+            cname = self.declare(s.name, v.type)
+            self.block.add(IRBind(cname, v, v.type, s.mutable, s.pos))
             return
 
         if k == 'assign':
             if s.op != '=':
                 self.not_impl(f"IR: compound assignment '{s.op}'")
-            if s.target.kind != 'ident':
-                self.not_impl("IR: non-ident assignment target")
-            v = self.lower_expr(s.value)
-            if v is None:
-                self.err("cannot assign a void expression", s.pos)
-            self.block.add(IRAssign(s.target.name, v, s.pos))
-            return
+
+            if s.target.kind == 'ident':
+                r = self.lookup(s.target.name)
+                if r is None:
+                    self.err(f"undefined name '{s.target.name}'", s.pos)
+                cname, _ty = r
+                v = self.lower_expr(s.value)
+                if v is None:
+                    self.err("cannot assign a void expression", s.pos)
+                self.block.add(IRAssign(cname, v, s.pos))
+                return
+
+            if s.target.kind == 'index':
+                if s.target.base.kind != 'ident':
+                    self.not_impl("IR: nested assignment target")
+                r = self.lookup(s.target.base.name)
+                if r is None:
+                    self.err(f"undefined name '{s.target.base.name}'",
+                             s.pos)
+                base_cname, base_type = r
+                idx = self.lower_expr(s.target.index)
+                if idx is None:
+                    self.err("index expression has no value", s.pos)
+                if not is_int(idx.type):
+                    self.err(f"index must be an integer, "
+                             f"got '{ts(idx.type)}'", s.pos)
+                v = self.lower_expr(s.value)
+                if v is None:
+                    self.err("cannot assign a void expression", s.pos)
+                base = IRLocal(base_cname, base_type)
+
+                if is_array(base_type):
+                    self.block.add(IRArraySet(base, idx, v, s.pos))
+                    return
+                if base_type[0] == 'ptr' and is_array(base_type[1]):
+                    self.block.add(IRArraySet(base, idx, v, s.pos))
+                    return
+                if base_type[0] == 'ptr' and base_type[1][0] in ('prim', 'ptr', 'named'):
+                    self.block.add(IRArraySet(base, idx, v, s.pos))
+                    return
+                if is_vector(base_type):
+                    self.block.add(IRVecSet(base, idx, v, s.pos))
+                    return
+                self.not_impl(f"IR: indexed assignment to "
+                              f"'{ts(base_type)}'")
 
         if k == 'if':
             self.lower_if(s)
@@ -294,15 +428,12 @@ class Lowering:
         if hi is None:
             self.err("for loop upper bound has no value", s.pos)
 
-        # The loop variable. Mutable so the increment can update it.
-        self.block.add(IRBind(s.var, lo, lo.type, True, s.pos))
-        self.declare(s.var, lo.type)
+        loop_cname = self.declare(s.var, lo.type)
+        self.block.add(IRBind(loop_cname, lo, lo.type, True, s.pos))
 
-        # The upper bound is evaluated once, before the loop. This matches
-        # the AST emitter and is what users expect from a range for-loop.
-        end_name = self.func.new_label("end")     # unique C-safe name
-        self.block.add(IRBind(end_name, hi, hi.type, False, s.pos))
-        self.declare(end_name, hi.type)
+        end_name = self.func.new_label("end")
+        end_cname = self.declare(end_name, hi.type)
+        self.block.add(IRBind(end_cname, hi, hi.type, False, s.pos))
 
         head_lbl = self.func.new_label("head")
         body_lbl = self.func.new_label("body")
@@ -311,18 +442,15 @@ class Lowering:
 
         self.block.add(IRJump(head_lbl, s.pos))
 
-        # Condition: i < end (or i <= end).
         self.block = self.func.add_block(head_lbl, s.pos)
-        iv = IRLocal(s.var, lo.type)
-        end_ref = IRLocal(end_name, hi.type)
+        iv = IRLocal(loop_cname, lo.type)
+        end_ref = IRLocal(end_cname, hi.type)
         cmp_op = '<=' if s.inclusive else '<'
         cond = self.func.new_temp(('prim', 'bool'))
         self.block.add(IRBinOp(cond, cmp_op, iv, end_ref,
                                ('prim', 'bool'), s.pos))
         self.block.add(IRCondJump(cond, body_lbl, end_lbl, s.pos))
 
-        # Body. `continue` jumps to the step block, not the head, so the
-        # increment still runs.
         self.block = self.func.add_block(body_lbl, s.pos)
         self.loop_stack.append((step_lbl, end_lbl))
         self.lower_stmt(s.body)
@@ -330,16 +458,14 @@ class Lowering:
         if not self.block.is_terminated():
             self.block.add(IRJump(step_lbl, s.pos))
 
-        # Step: i = i + 1, then back to head.
         self.block = self.func.add_block(step_lbl, s.pos)
         one = IRConst(1, lo.type)
         incremented = self.func.new_temp(lo.type)
-        iv2 = IRLocal(s.var, lo.type)
+        iv2 = IRLocal(loop_cname, lo.type)
         self.block.add(IRBinOp(incremented, '+', iv2, one, lo.type, s.pos))
-        self.block.add(IRAssign(s.var, incremented, s.pos))
+        self.block.add(IRAssign(loop_cname, incremented, s.pos))
         self.block.add(IRJump(head_lbl, s.pos))
 
-        # Merge.
         self.block = self.func.add_block(end_lbl, s.pos)
 
         self.pop_scope()
@@ -404,22 +530,26 @@ class Lowering:
                     self.block.add(IRConcat(dst, acc, seg, e.pos))
                     acc = dst
             return acc
-
-
             
         if k == 'ident':
-            t = self.lookup(e.name)
-            if t is not None:
-                return IRLocal(e.name, t)
+            r = self.lookup(e.name)
+            if r is not None:
+                cname, ty = r
+                return IRLocal(cname, ty)
             if e.name in self.module.globals:
-                _, ty = self.module.globals[e.name]
+                _, ty, _val = self.module.globals[e.name]
                 return IRLocal(e.name, ty)
-            self.err(f"undefined name '{e.name}'", e.pos)
+            in_scope = []
+            for scope in reversed(self.scopes):
+                in_scope.extend(scope.keys())
+            suggestion = ""
+            if in_scope:
+                suggestion = f" (in scope: {', '.join(sorted(in_scope))})"
+            self.err(f"undefined name '{e.name}'{suggestion}", e.pos)
 
         if k == 'call':
             return self.lower_call(e)
 
-            
         if k == 'bin':
             if e.op in ('&&', '||'):
                 return self.lower_logical(e, e.op == '&&')
@@ -427,9 +557,24 @@ class Lowering:
             r = self.lower_expr(e.right)
             if l is None or r is None:
                 self.err(f"'{e.op}' needs value operands", e.pos)
-            # Comparison operators produce bool, not the common type of
-            # their operands. Ordering comparisons additionally require
-            # numeric or pointer operands, matching the AST path.
+
+            # Pointer arithmetic: ptr ± int, int + ptr, ptr - ptr.
+            if e.op in ('+', '-') and (l.type[0] == 'ptr' or r.type[0] == 'ptr'):
+                return self.lower_ptr_arith(e, l, r)
+
+            # Vector comparison is not an elementwise C operator. Users
+            # get element access or a reduction instead.
+            if e.op in ('==', '!=', '<', '<=', '>', '>='):
+                if is_vector(l.type) or is_vector(r.type):
+                    self.err("vector comparison not supported; "
+                             "use element access or a reduction", e.pos)
+
+            # Broadcast a scalar operand to match a vector operand.
+            if is_vector(l.type) and not is_vector(r.type):
+                r = self.broadcast(r, l.type, e.pos)
+            elif is_vector(r.type) and not is_vector(l.type):
+                l = self.broadcast(l, r.type, e.pos)
+
             if e.op in ('==', '!='):
                 self.common_type(l.type, r.type, e.pos)
                 t = ('prim', 'bool')
@@ -446,6 +591,8 @@ class Lowering:
             return dst
 
         if k == 'un':
+            if e.op == '&':
+                return self.lower_ref(e)
             v = self.lower_expr(e.expr)
             if v is None:
                 self.err(f"'{e.op}' needs a value operand", e.pos)
@@ -458,6 +605,12 @@ class Lowering:
             
         if k == 'veclit':
             return self.lower_veclit(e)
+            
+        if k == 'arrlit':
+            return self.lower_arrlit(e)
+
+        if k == 'alloc':
+            return self.lower_alloc(e)
 
         if k == 'cast':
             return self.lower_cast(e)
@@ -563,7 +716,174 @@ class Lowering:
         tmp = self.func.new_temp(dst)
         self.block.add(IRCast(tmp, v, dst, e.pos))
         return tmp
+     
+    def lower_math(self, name, e):
+        if len(e.args) != 1:
+            self.err(f"{name} takes exactly one argument", e.pos)
+        if e.args[0].kind == 'namedarg':
+            self.err(f"{name} takes a positional argument", e.pos)
+
+        v = self.lower_expr(e.args[0])
+        if v is None:
+            self.err(f"argument to {name} has no value", e.pos)
+        at = v.type
+
+        # Vector: same-type result, must be a float vector.
+        if is_vector(at):
+            if at not in (('prim', 'v4f32'),):
+                self.err(f"{name} not supported on '{ts(at)}'", e.pos)
+            dst = self.func.new_temp(at)
+            self.block.add(IRMathOp(dst, name, [v], at, e.pos))
+            return dst
+
+        # Scalar: promote to f32 or f64, compute, return that.
+        if at == ('prim', 'f32'):
+            rt = ('prim', 'f32')
+        elif at == ('prim', 'f64'):
+            rt = ('prim', 'f64')
+        elif is_num(at):
+            # integer, f16, bf16, or q types promote to f64
+            tmp = self.func.new_temp(('prim', 'f64'))
+            self.block.add(IRCast(tmp, v, ('prim', 'f64'), e.pos))
+            v = tmp
+            rt = ('prim', 'f64')
+        else:
+            self.err(f"{name} needs a numeric argument, got '{ts(at)}'",
+                     e.pos)
+
+        dst = self.func.new_temp(rt)
+        self.block.add(IRMathOp(dst, name, [v], rt, e.pos))
+        return dst
         
+    def lower_reduce(self, name, e):
+        if len(e.args) != 1:
+            self.err(f"{name} takes exactly one argument", e.pos)
+        if e.args[0].kind == 'namedarg':
+            self.err(f"{name} takes a positional argument", e.pos)
+
+        v = self.lower_expr(e.args[0])
+        if v is None:
+            self.err(f"argument to {name} has no value", e.pos)
+
+        if not is_vector(v.type):
+            self.err(f"{name} needs a vector argument, got '{ts(v.type)}'",
+                     e.pos)
+
+        et = vector_elem(v.type)
+        dst = self.func.new_temp(et)
+        self.block.add(IRVecReduce(dst, VEC_REDUCTIONS[name], v, et, e.pos))
+        return dst
+        
+    def lower_vec_binop(self, name, e):
+        op, arity = VEC_BIN_OPS[name]
+        if len(e.args) != arity:
+            self.err(f"{name} takes exactly {arity} argument(s)", e.pos)
+
+        args = []
+        for a in e.args:
+            if a.kind == 'namedarg':
+                self.err(f"{name} takes positional arguments only", e.pos)
+            v = self.lower_expr(a)
+            if v is None:
+                self.err(f"argument to {name} has no value", a.pos)
+            if not is_vector(v.type):
+                self.err(f"{name} needs vector arguments, "
+                         f"got '{ts(v.type)}'", a.pos)
+            args.append(v)
+
+        vt = args[1].type if op == 'vselect' else args[0].type
+        for a in args[1:]:
+            if a.type != vt:
+                self.err(f"{name} arguments must all have type "
+                         f"'{ts(vt)}'", e.pos)
+        if op == 'vselect' and args[0].type != vt:
+            self.err(f"vselect mask must have type '{ts(vt)}'", e.pos)
+
+        # vcmplt / vcmpgt produce the same vector shape, treating the
+        # result as a bit-mask. Users pass it only to vselect.
+        dst = self.func.new_temp(vt)
+        self.block.add(IRVecBinOp(dst, op, args, vt, e.pos))
+        return dst
+
+    def lower_file_op(self, name, e):
+        if name == 'file_size':
+            if len(e.args) != 1:
+                self.err("file_size takes 1 argument (path)", e.pos)
+            path = self.lower_expr(e.args[0])
+            if path is None or path.type != ('prim', 'str'):
+                self.err("file_size: path must be a string", e.pos)
+            dst = self.func.new_temp(('prim', 'i64'))
+            self.block.add(IRCall(dst, 'lp_file_size', [path],
+                                  ('prim', 'i64'), e.pos))
+            return dst
+
+        if name == 'read_file_at':
+            if len(e.args) != 4:
+                self.err("read_file_at takes 4 arguments "
+                         "(path, offset, buf, n)", e.pos)
+            path = self.lower_expr(e.args[0])
+            if path is None or path.type != ('prim', 'str'):
+                self.err("read_file_at: path must be a string", e.pos)
+            offset = self.coerce_to_i64(e.args[1], "read_file_at: offset")
+            buf = self.lower_expr(e.args[2])
+            if buf is None or buf.type[0] != 'ptr':
+                self.err("read_file_at: buf must be a pointer", e.pos)
+            n = self.coerce_to_i64(e.args[3], "read_file_at: n")
+            dst = self.func.new_temp(('prim', 'i64'))
+            self.block.add(IRCall(dst, 'lp_read_file_at',
+                                  [path, offset, buf, n],
+                                  ('prim', 'i64'), e.pos))
+            return dst
+
+        if name == 'write_file':
+            if len(e.args) != 3:
+                self.err("write_file takes 3 arguments (path, buf, n)", e.pos)
+            path = self.lower_expr(e.args[0])
+            if path is None or path.type != ('prim', 'str'):
+                self.err("write_file: path must be a string", e.pos)
+            buf = self.lower_expr(e.args[1])
+            if buf is None or buf.type[0] != 'ptr':
+                self.err("write_file: buf must be a pointer", e.pos)
+            n = self.coerce_to_i64(e.args[2], "write_file: n")
+            dst = self.func.new_temp(('prim', 'i64'))
+            self.block.add(IRCall(dst, 'lp_write_file', [path, buf, n],
+                                  ('prim', 'i64'), e.pos))
+            return dst
+
+        self.err(f"unknown file builtin '{name}'", e.pos)
+
+    def lower_read(self, name, e):
+        if len(e.args) != 2:
+            self.err(f"{name} takes 2 arguments (buf, offset)", e.pos)
+        buf = self.lower_expr(e.args[0])
+        if buf is None:
+            self.err(f"{name}: buffer has no value", e.args[0].pos)
+        if buf.type[0] != 'ptr':
+            self.err(f"{name}: first argument must be a pointer, "
+                     f"got '{ts(buf.type)}'", e.args[0].pos)
+        off = self.coerce_to_i64(e.args[1], f"{name}: offset")
+        ret_name, cname = READ_BUILTINS[name]
+        dst = self.func.new_temp(('prim', ret_name))
+        self.block.add(IRCall(dst, cname, [buf, off],
+                              ('prim', ret_name), e.pos))
+        return dst
+
+    def lower_read_str(self, e):
+        if len(e.args) != 3:
+            self.err("read_str takes 3 arguments (buf, offset, n)", e.pos)
+        buf = self.lower_expr(e.args[0])
+        if buf is None:
+            self.err("read_str: buffer has no value", e.args[0].pos)
+        if buf.type[0] != 'ptr':
+            self.err(f"read_str: first argument must be a pointer, "
+                     f"got '{ts(buf.type)}'", e.args[0].pos)
+        off = self.coerce_to_i64(e.args[1], "read_str: offset")
+        n = self.coerce_to_i64(e.args[2], "read_str: n")
+        dst = self.func.new_temp(('prim', 'str'))
+        self.block.add(IRCall(dst, 'lp_read_str', [buf, off, n],
+                              ('prim', 'str'), e.pos))
+        return dst
+
     def lower_veclit(self, e):
         n = len(e.elems)
         vals = [self.lower_expr(el) for el in e.elems]
@@ -596,6 +916,41 @@ class Lowering:
         dst = self.func.new_temp(vt)
         self.block.add(IRVecLit(dst, elems, vt, e.pos))
         return dst
+        
+    def lower_arrlit(self, e):
+        vals = [self.lower_expr(el) for el in e.elems]
+        for v, el in zip(vals, e.elems):
+            if v is None:
+                self.err("array element has no value", el.pos)
+
+        common = vals[0].type
+        for v in vals[1:]:
+            common = self.common_type(common, v.type, e.pos)
+
+        elems = []
+        for v in vals:
+            if v.type == common:
+                elems.append(v)
+            else:
+                tmp = self.func.new_temp(common)
+                self.block.add(IRCast(tmp, v, common, e.pos))
+                elems.append(tmp)
+
+        at = ('array', common, len(elems))
+        dst = self.func.new_temp(at)
+        self.block.add(IRArrayLit(dst, elems, at, e.pos))
+        return dst
+        
+    def broadcast(self, v, vec_type, pos):
+        """Cast scalar v to vec_type's element type and splat it."""
+        et = vector_elem(vec_type)
+        if v.type != et:
+            tmp = self.func.new_temp(et)
+            self.block.add(IRCast(tmp, v, et, pos))
+            v = tmp
+        dst = self.func.new_temp(vec_type)
+        self.block.add(IRSplat(dst, v, vec_type, pos))
+        return dst
 
     def lower_index(self, e):
         base = self.lower_expr(e.base)
@@ -615,8 +970,92 @@ class Lowering:
             self.block.add(IRVecIndex(dst, base, idx, et, e.pos))
             return dst
 
+        if is_array(bt):
+            et = array_elem(bt)
+            dst = self.func.new_temp(et)
+            self.block.add(IRArrayIndex(dst, base, idx, et, e.pos))
+            return dst
+
+        # ptr[[T; N]] — index through the pointer without an explicit
+        # dereference. The emitter renders base->e[i] instead of base.e[i].
+        if bt[0] == 'ptr' and is_array(bt[1]):
+            et = array_elem(bt[1])
+            dst = self.func.new_temp(et)
+            self.block.add(IRArrayIndex(dst, base, idx, et, e.pos))
+            return dst
+
+        if bt[0] == 'ptr' and bt[1][0] in ('prim', 'ptr', 'named'):
+            et = bt[1]
+            dst = self.func.new_temp(et)
+            self.block.add(IRArrayIndex(dst, base, idx, et, e.pos))
+            return dst
+
+        if bt == ('prim', 'str'):
+            dst = self.func.new_temp(('prim', 'char'))
+            self.block.add(IRArrayIndex(dst, base, idx, ('prim', 'char'), e.pos))
+            return dst
+
         self.not_impl(f"IR: indexing '{ts(bt)}' not yet lowered")
-    
+
+    def lower_ptr_arith(self, e, l, r):
+        lt = l.type
+        rt = r.type
+        lp = lt[0] == 'ptr'
+        rp = rt[0] == 'ptr'
+
+        # ptr - ptr → i64 (element difference)
+        if lp and rp and e.op == '-':
+            if lt != rt:
+                self.err(f"cannot subtract '{ts(rt)}' from '{ts(lt)}'",
+                         e.pos)
+            dst = self.func.new_temp(('prim', 'i64'))
+            self.block.add(IRBinOp(dst, '-', l, r, ('prim', 'i64'), e.pos))
+            return dst
+
+        # ptr ± int → same ptr type
+        if lp and not rp:
+            if not is_int(rt):
+                self.err(f"pointer arithmetic needs an integer, "
+                         f"got '{ts(rt)}'", e.pos)
+            dst = self.func.new_temp(lt)
+            self.block.add(IRBinOp(dst, e.op, l, r, lt, e.pos))
+            return dst
+
+        # int + ptr → same ptr type (commutative; - is not)
+        if rp and not lp:
+            if e.op != '+':
+                self.err(f"cannot use '{e.op}' with pointer on the right",
+                         e.pos)
+            if not is_int(lt):
+                self.err(f"pointer arithmetic needs an integer, "
+                         f"got '{ts(lt)}'", e.pos)
+            dst = self.func.new_temp(rt)
+            self.block.add(IRBinOp(dst, '+', l, r, rt, e.pos))
+            return dst
+
+        self.err(f"unsupported pointer arithmetic between "
+                 f"'{ts(lt)}' and '{ts(rt)}'", e.pos)
+
+    def lower_ref(self, e):
+        if e.expr.kind != 'ident':
+            self.err("'&' requires a named value", e.pos)
+        name = e.expr.name
+        r = self.lookup(name)
+        if r is None:
+            self.err(f"undefined name '{name}'", e.pos)
+        cname, t = r
+        dst = self.func.new_temp(('ptr', t))
+        self.block.add(IRRef(dst, IRLocal(cname, t), ('ptr', t), e.pos))
+        return dst
+
+    def lower_alloc(self, e):
+        t = self.resolve_type(e.type, e.pos)
+        if not is_array(t):
+            self.err(f"alloc requires an array type, got '{ts(t)}'", e.pos)
+        dst = self.func.new_temp(('ptr', t))
+        self.block.add(IRAlloc(dst, t, e.pos))
+        return dst
+
     def lower_call(self, e):
         if e.callee.kind != 'ident':
             self.not_impl("IR: only named calls are supported")
@@ -624,7 +1063,25 @@ class Lowering:
         name = e.callee.name
 
         if name in BUILTIN_C_NAMES:
-            return self.lower_builtin(name, e)  
+            return self.lower_builtin(name, e)
+
+        if name in MATH_INTRINSICS:
+            return self.lower_math(name, e) 
+            
+        if name in VEC_REDUCTIONS:
+            return self.lower_reduce(name, e)
+            
+        if name in VEC_BIN_OPS:
+            return self.lower_vec_binop(name, e)
+
+        if name in FILE_BUILTINS:
+            return self.lower_file_op(name, e)
+
+        if name in READ_BUILTINS:
+            return self.lower_read(name, e)
+
+        if name in STRING_BUILTINS:
+            return self.lower_read_str(e)
             
         if name in self.module.structs:
             return self.lower_struct_init(name, e)
@@ -700,6 +1157,18 @@ class Lowering:
             return dst
         self.err(f"cannot convert '{t}' to str", pos)
 
+    def coerce_to_i64(self, node, ctx):
+        v = self.lower_expr(node)
+        if v is None:
+            self.err(f"{ctx} has no value", node.pos)
+        if v.type == ('prim', 'i64'):
+            return v
+        if not is_int(v.type):
+            self.err(f"{ctx} must be an integer, got '{ts(v.type)}'",
+                     node.pos)
+        tmp = self.func.new_temp(('prim', 'i64'))
+        self.block.add(IRCast(tmp, v, ('prim', 'i64'), node.pos))
+        return tmp
     # -- types ---------------------------------------------------------------
         
     def common_type(self, a, b, pos):

@@ -1,6 +1,9 @@
 /* Lepton kernel runtime: satisfies every lp_* symbol the compiler emits
    in --freestanding mode, and provides memset/memcpy for GCC. */
 
+extern void vga_putc(char c);
+extern void vga_clear(void);
+
 typedef unsigned int   uint32_t;
 typedef unsigned char  uint8_t;
 typedef __SIZE_TYPE__  size_t;
@@ -33,20 +36,62 @@ static void serial_putc(char c) {
 }
 
 /* ---------- compiler runtime ---------- */
-#define HEAP_SIZE (64 * 1024)
+//#define HEAP_SIZE (64 * 1024)
+//static unsigned char heap[HEAP_SIZE];
+/* 32 MB heap. Enough for a dequantized 768x768 f32 tensor (2.3 MB),
+   plus scratch and model buffers. QEMU's default 128 MB RAM handles
+   this comfortably. On real hardware with less than 64 MB, drop this
+   to 8 MB and use smaller tensors. */
+#define HEAP_SIZE (8 * 1024 * 1024)
 static unsigned char heap[HEAP_SIZE];
 static unsigned long heap_used = 0;
 
+static unsigned char *heap_start = 0;
+static unsigned long heap_max = 0;
+
+void lp_alloc_init(void *start, unsigned long size) {
+    heap_start = (unsigned char *)start;
+    heap_used = 0;
+    heap_max = size;
+}
+
 char *lp_alloc(unsigned long n) {
     n = (n + 15UL) & ~15UL;
-    if (heap_used + n > HEAP_SIZE) return (char *)0;
-    char *p = (char *)&heap[heap_used];
+    if (heap_start == 0) return (char *)0;
+    if (heap_used + n > heap_max) return (char *)0;
+    char *p = (char *)&heap_start[heap_used];
     heap_used += n;
     return p;
 }
 
-void lp_print(const char *s)  { while (*s) serial_putc(*s++); }
-void lp_println(const char *s) { lp_print(s); serial_putc('\r'); serial_putc('\n'); }
+//char *lp_alloc(unsigned long n) {
+//    n = (n + 15UL) & ~15UL;
+//    if (heap_used + n > HEAP_SIZE) return (char *)0;
+//    char *p = (char *)&heap[heap_used];
+//    heap_used += n;
+//    return p;
+//}
+
+void lp_print(const char *s) {
+    while (*s) {
+        char c = *s++;
+        if (c == '\n') {
+            serial_putc('\r');  /* serial needs CRLF */
+            serial_putc('\n');
+            vga_putc('\n');
+        } else {
+            serial_putc(c);
+            vga_putc(c);
+        }
+    }
+}
+
+void lp_println(const char *s) {
+    lp_print(s);
+    serial_putc('\r');
+    serial_putc('\n');
+    vga_putc('\n');
+}
 
 void lp_panic(const char *s) {
     lp_print("PANIC: ");
@@ -63,6 +108,14 @@ const char *lp_cat(const char *a, const char *b) {
     for (i = 0; i < la; i++) r[i] = a[i];
     for (i = 0; i < lb; i++) r[la + i] = b[i];
     r[la + lb] = 0;
+    return r;
+}
+
+const char *lp_read_str(const void *buf, long long offset, long long n) {
+    char *r = lp_alloc((unsigned long)(n + 1));
+    const unsigned char *p = (const unsigned char *)buf + offset;
+    for (long long i = 0; i < n; i++) r[i] = (char)p[i];
+    r[n] = 0;
     return r;
 }
 
@@ -99,16 +152,83 @@ const char *lp_str_u64(unsigned long long u) {
 
 const char *lp_str_bool(int v) { return v ? "true" : "false"; }
 
+//const char *lp_str_char(char c) {
+//    static char buf[2];
+//    buf[0] = c; buf[1] = 0;
+//    return buf;
+//}
+
 const char *lp_str_char(char c) {
-    static char buf[2];
-    buf[0] = c; buf[1] = 0;
-    return buf;
+    /* Four static buffers so `{a}{b}{c}{d}` renders four distinct chars. */
+    static char bufs[4][2];
+    static int idx = 0;
+    char *b = bufs[idx];
+    idx = (idx + 1) & 3;
+    b[0] = c;
+    b[1] = 0;
+    return b;
 }
 
 const char *lp_str_f64(double v) {
-    /* Floats are rarely useful in a kernel; provide a placeholder. */
-    (void)v;
-    return "<f64>";
+    /* Four static buffers so `{a} {b} {c} {d}` prints four distinct values
+       without aliasing. Sufficient for interpolation; not thread-safe. */
+    static char bufs[4][40];
+    static int idx = 0;
+    char *buf = bufs[idx];
+    idx = (idx + 1) & 3;
+    int i = 0;
+
+    /* NaN check: NaN != NaN */
+    if (v != v) {
+        buf[0]='n'; buf[1]='a'; buf[2]='n'; buf[3]=0;
+        return buf;
+    }
+
+    /* Negative numbers */
+    if (v < 0.0) {
+        buf[i++] = '-';
+        v = -v;
+    }
+
+    /* Very large: saturate to "inf" */
+    if (v > 1e15) {
+        buf[i++]='i'; buf[i++]='n'; buf[i++]='f'; buf[i]=0;
+        return buf;
+    }
+
+    unsigned long long ip = (unsigned long long)v;
+    double frac = v - (double)ip;
+
+    /* Integer part, built in reverse */
+    char tmp[24];
+    int j = 0;
+    if (ip == 0) {
+        tmp[j++] = '0';
+    } else {
+        while (ip > 0) {
+            tmp[j++] = (char)('0' + (int)(ip % 10));
+            ip /= 10;
+        }
+    }
+    while (j > 0) buf[i++] = tmp[--j];
+
+    /* Fractional part: up to 6 digits, trailing zeros trimmed */
+    if (frac > 1e-10) {
+        buf[i++] = '.';
+        int digits = 0;
+        while (frac > 1e-10 && digits < 6) {
+            frac *= 10.0;
+            int d = (int)frac;
+            buf[i++] = (char)('0' + d);
+            frac -= (double)d;
+            digits++;
+        }
+        while (i > 0 && buf[i-1] == '0') i--;
+        if (i > 0 && buf[i-1] == '.') i--;
+    }
+
+    buf[i] = 0;
+    return buf;
 }
 
 /* ---------- GCC builtins ---------- */

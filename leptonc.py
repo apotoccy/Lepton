@@ -34,7 +34,7 @@ class CompileError(Exception):
 KEYWORDS = {
     'fn', 'let', 'var', 'const', 'if', 'else', 'while', 'for', 'in',
     'return', 'break', 'continue', 'struct', 'enum', 'raw', 'extern',
-    'as', 'true', 'false', 'void', 'import',
+    'as', 'true', 'false', 'void', 'import', 'alloc',
 }
 
 PUNCT = sorted([
@@ -321,6 +321,8 @@ class Parser:
                                    name=nm, type=ty))
                 if not self.eat('op', ','):
                     break
+                if self.at_op(')'):
+                    break
         self.expect('op', ')')
         return params
         
@@ -388,6 +390,8 @@ class Parser:
             while not self.at_op('}'):
                 variants.append(self.expect('ident')[1])
                 if not self.eat('op', ','):
+                    break
+                if self.at_op('}'):
                     break
             self.expect('op', '}')
             return Node('enum', pos=start, name=name, variants=variants)
@@ -558,6 +562,8 @@ class Parser:
                             args.append(self.parse_expr())
                         if not self.eat('op', ','):
                             break
+                        if self.at_op(')'):
+                            break
                 self.expect('op', ')')
                 e = Node('call', pos=e.pos, callee=e, args=args)
 
@@ -624,6 +630,13 @@ class Parser:
             e = self.parse_expr()
             self.expect('op', ')')
             return e
+
+        if t[0] == 'kw' and t[1] == 'alloc':
+            self.next()
+            self.expect('op', '(')
+            ty = self.parse_type()
+            self.expect('op', ')')
+            return Node('alloc', pos=start, type=ty)
             
         if self.at_op('['):
             self.next()
@@ -633,10 +646,27 @@ class Parser:
                     elems.append(self.parse_expr())
                     if not self.eat('op', ','):
                         break
+                    if self.at_op(']'):
+                        break
             self.expect('op', ']')
             if not elems:
                 self.err("empty vector literal", start)
             return Node('veclit', pos=start, elems=elems)
+            
+        if self.at_op('{'):
+            self.next()
+            elems = []
+            if not self.at_op('}'):
+                while True:
+                    elems.append(self.parse_expr())
+                    if not self.eat('op', ','):
+                        break
+                    if self.at_op('}'):
+                        break
+            self.expect('op', '}')
+            if not elems:
+                self.err("empty array literal", start)
+            return Node('arrlit', pos=start, elems=elems)            
 
         self.err(f"unexpected token {t[1]!r}")
 
@@ -708,6 +738,15 @@ def flatten_imports(items, fname, search_paths):
             flat.append(it)
     return flat
 
+def compile_to_ir(src, fname, search_paths=None):
+    """Compile source text to an IR module. Useful for --dump-ir and
+    other tooling that wants to inspect or transform the IR."""
+    toks = lex(src, fname)
+    items = Parser(toks, fname).parse_program()
+    if search_paths is not None:
+        items = flatten_imports(items, fname, search_paths)
+    from lepton_lower import lower_module
+    return lower_module(items, fname)
 
 def compile_source(src, fname, freestanding=False, search_paths=None,
                    target=None):
@@ -717,16 +756,20 @@ def compile_source(src, fname, freestanding=False, search_paths=None,
     emit C. The IR modules are imported lazily to avoid an import cycle:
     lepton_lower and lepton_c_ir both import CompileError from this file.
     """
-    toks = lex(src, fname)
-    items = Parser(toks, fname).parse_program()
-    if search_paths is not None:
-        items = flatten_imports(items, fname, search_paths)
-
-    from lepton_lower import lower_module
     from lepton_c_ir import compile_ir
-
-    module = lower_module(items, fname)
+    module = compile_to_ir(src, fname, search_paths)
     return compile_ir(module, fname, freestanding, target)
+# deprecated
+#     toks = lex(src, fname)
+#     items = Parser(toks, fname).parse_program()
+#     if search_paths is not None:
+#         items = flatten_imports(items, fname, search_paths)
+#
+#     from lepton_lower import lower_module
+#     from lepton_c_ir import compile_ir
+#
+#     module = lower_module(items, fname)
+#     return compile_ir(module, fname, freestanding, target)
 
 
 def main(argv=None):
@@ -745,6 +788,8 @@ def main(argv=None):
     ap.add_argument('--target', default='scalar',
                     choices=['scalar', 'x86_64'],
                     help='vector lowering target (default: scalar)')
+    ap.add_argument('--dump-ir', action='store_true',
+                    help='print the lowered IR instead of compiling')
     a = ap.parse_args(argv)
 
     try:
@@ -755,6 +800,18 @@ def main(argv=None):
         return 1
 
     try:
+        if a.dump_ir:
+            from lepton_ir import render_module
+            module = compile_to_ir(src, a.input,
+                                   search_paths=default_search_paths())
+            text = render_module(module)
+            if a.output:
+                with open(a.output, 'w') as f:
+                    f.write(text)
+                print(f"wrote {a.output}")
+            else:
+                sys.stdout.write(text)
+            return 0
         csrc = compile_source(src, a.input, a.freestanding,
                               search_paths=default_search_paths(),
                               target=a.target)

@@ -1,0 +1,55 @@
+# Build outputs
+build/
+*.o
+*.obj
+*.elf
+*.bin
+*.iso
+*.a
+*.so
+*.dylib
+*.exe
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+core
+core.*
+
+# Model binaries are large and may have their own license.
+# models/README.md documents the expected file and checksum.
+models/*
+!models/README.md
+*.gguf
+
+# Historical development transcripts (43 MB of .docx).
+# They are intentionally excluded from the default clone; see
+# READFILES/README.md if you want to add them with Git LFS.
+READFILES/*
+!READFILES/README.md
+
+# Scratch space for AI-assisted development.
+AI-WORKSPACE/*
+!AI-WORKSPACE/.gitkeep

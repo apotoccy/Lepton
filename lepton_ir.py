@@ -233,6 +233,175 @@ class IRCast(IRInstr):
     def replace_operand(self, old, new):
         if self.value is old:
             self.value = new
+         
+class IRMathOp(IRInstr):
+    """dst = op(arg). op is one of: sqrt, rsqrt, exp, tanh, erf.
+
+    For scalars, `type` is the result type and args[0] is the operand.
+    For vectors, both are vector types. The dispatch to a scalar helper
+    or a target intrinsic happens at emission time.
+    """
+    def __init__(self, dst, op, args, type, pos=None):
+        super().__init__(pos)
+        self.dst = dst
+        self.op = op
+        self.args = args
+        self.type = type
+
+    def operands(self):
+        return list(self.args)
+
+    def replace_operand(self, old, new):
+        self.args = [new if a is old else a for a in self.args]
+   
+class IRVecReduce(IRInstr):
+    """dst = reduce_op(vec). op is one of: sum, max, min.
+
+    `vec` is a vector-typed IRValue; `type` is the scalar element type
+    of that vector. The reduction collapses the vector to a single value
+    of the element type.
+    """
+    def __init__(self, dst, op, vec, type, pos=None):
+        super().__init__(pos)
+        self.dst = dst
+        self.op = op
+        self.vec = vec
+        self.type = type
+
+    def operands(self):
+        return [self.vec]
+
+    def replace_operand(self, old, new):
+        if self.vec is old:
+            self.vec = new
+            
+class IRSplat(IRInstr):
+    """dst = broadcast of scalar `value` to a vector of type `type`.
+
+    The value's type is the vector's element type. Used by the lowerer
+    to promote a scalar operand when the other side of a binary op is a
+    vector.
+    """
+    def __init__(self, dst, value, type, pos=None):
+        super().__init__(pos)
+        self.dst = dst
+        self.value = value
+        self.type = type
+
+    def operands(self):
+        return [self.value]
+
+    def replace_operand(self, old, new):
+        if self.value is old:
+            self.value = new
+            
+class IRVecBinOp(IRInstr):
+    """dst = vec_op(args...).
+
+    op is one of: vmax2, vmin2, vcmplt, vcmpgt, vselect.
+
+    For vmax2 / vmin2 / vcmplt / vcmpgt, args is [a, b] with both
+    vectors of the same type, and `type` is that type.
+
+    For vselect, args is [mask, then_value, else_value]. The mask is a
+    vector of the same shape as the values; a lane of the mask that has
+    all bits set selects from `then`, otherwise from `else`. `type` is
+    the value type.
+    """
+    def __init__(self, dst, op, args, type, pos=None):
+        super().__init__(pos)
+        self.dst = dst
+        self.op = op
+        self.args = args
+        self.type = type
+
+    def operands(self):
+        return list(self.args)
+
+    def replace_operand(self, old, new):
+        self.args = [new if a is old else a for a in self.args]
+        
+class IRArrayLit(IRInstr):
+    """dst = { e0, e1, ..., eN } of the given array type."""
+    def __init__(self, dst, elems, type, pos=None):
+        super().__init__(pos)
+        self.dst = dst
+        self.elems = elems
+        self.type = type
+
+    def operands(self):
+        return list(self.elems)
+
+    def replace_operand(self, old, new):
+        self.elems = [new if e is old else e for e in self.elems]
+
+
+class IRArrayIndex(IRInstr):
+    """dst = base[index]."""
+    def __init__(self, dst, base, index, type, pos=None):
+        super().__init__(pos)
+        self.dst = dst
+        self.base = base
+        self.index = index
+        self.type = type
+
+    def operands(self):
+        return [self.base, self.index]
+
+    def replace_operand(self, old, new):
+        if self.base is old:  self.base = new
+        if self.index is old: self.index = new
+
+
+class IRArraySet(IRInstr):
+    """base[index] = value. A statement, not an expression: no dst."""
+    def __init__(self, base, index, value, pos=None):
+        super().__init__(pos)
+        self.base = base
+        self.index = index
+        self.value = value
+
+    def operands(self):
+        return [self.base, self.index, self.value]
+
+    def replace_operand(self, old, new):
+        if self.base is old:  self.base = new
+        if self.index is old: self.index = new
+        if self.value is old: self.value = new        
+            
+class IRRef(IRInstr):
+    """dst = &value. Only a nameable local can be referenced.
+
+    `value` is an IRLocal of the referent type; `type` is ('ptr', T).
+    """
+    def __init__(self, dst, value, type, pos=None):
+        super().__init__(pos)
+        self.dst = dst
+        self.value = value
+        self.type = type
+
+    def operands(self):
+        return [self.value]
+
+    def replace_operand(self, old, new):
+        if self.value is old:
+            self.value = new
+
+class IRAlloc(IRInstr):
+    """dst = heap allocation of one array of the given type.
+
+    `array_type` is the ('array', elem, count) type; `type` is
+    ('ptr', array_type). The pointer is uninitialized — the caller
+    is expected to write before reading, or to zero the array first.
+    """
+    def __init__(self, dst, array_type, pos=None):
+        super().__init__(pos)
+        self.dst = dst
+        self.array_type = array_type
+        self.type = ('ptr', array_type)
+
+    def operands(self):
+        return []
             
 class IRVecLit(IRInstr):
     """dst = { e0, e1, ..., eN } of the given vector type."""
@@ -264,6 +433,27 @@ class IRVecIndex(IRInstr):
     def replace_operand(self, old, new):
         if self.vec is old:   self.vec = new
         if self.index is old: self.index = new
+
+class IRVecSet(IRInstr):
+    """vec[index] = value. A statement: no dst.
+
+    Assigns one lane of a vector. `value`'s type is the vector's element
+    type. The vector must be a nameable local; `f()[i] = x` is not
+    supported.
+    """
+    def __init__(self, vec, index, value, pos=None):
+        super().__init__(pos)
+        self.vec = vec
+        self.index = index
+        self.value = value
+
+    def operands(self):
+        return [self.vec, self.index, self.value]
+
+    def replace_operand(self, old, new):
+        if self.vec is old:   self.vec = new
+        if self.index is old: self.index = new
+        if self.value is old: self.value = new
 
 class IRStructInit(IRInstr):
     """dst = StructName{ .field = value, ... }.
@@ -418,3 +608,134 @@ class IRModule:
         self.enums = {}        # name -> list of variant names
         self.globals = {}      # name -> (cname, type)
         self.externs = {}      # name -> (list of (name, type), ret)
+
+# ---------------------------------------------------------------------------
+#  IR pretty-printer
+# ---------------------------------------------------------------------------
+
+def _fmt_type(t):
+    if t is None:
+        return 'void'
+    if t[0] == 'prim':
+        return t[1]
+    if t[0] == 'ptr':
+        return f"ptr[{_fmt_type(t[1])}]"
+    if t[0] == 'array':
+        return f"[{_fmt_type(t[1])}; {t[2]}]"
+    if t[0] == 'named':
+        return t[1]
+    return str(t)
+
+
+def render_value(v):
+    if isinstance(v, IRTemp):
+        return f"%{v.id}"
+    if isinstance(v, IRLocal):
+        return f"${v.name}"
+    if isinstance(v, IRConst):
+        val = v.value
+        if isinstance(val, str):
+            return f'"{val}"'
+        if isinstance(val, bool):
+            return 'true' if val else 'false'
+        return repr(val)
+    return f"<{v!r}>"
+
+
+def render_instr(instr):
+    if isinstance(instr, IRBind):
+        kw = 'var' if instr.mutable else 'let'
+        return f"{kw} {instr.name} = {render_value(instr.value)}"
+    if isinstance(instr, IRAssign):
+        return f"{instr.name} = {render_value(instr.value)}"
+    if isinstance(instr, IRBinOp):
+        return (f"%{instr.dst.id} = {render_value(instr.left)} {instr.op} "
+                f"{render_value(instr.right)}")
+    if isinstance(instr, IRUnOp):
+        return f"%{instr.dst.id} = {instr.op}{render_value(instr.operand)}"
+    if isinstance(instr, IRCall):
+        args = ", ".join(render_value(a) for a in instr.args)
+        lhs = f"%{instr.dst.id} = " if instr.dst else ""
+        return f"{lhs}{instr.callee}({args})"
+    if isinstance(instr, IRReturn):
+        if instr.value is None:
+            return "return"
+        return f"return {render_value(instr.value)}"
+    if isinstance(instr, IRJump):
+        return f"goto {instr.target}"
+    if isinstance(instr, IRCondJump):
+        return (f"branch {render_value(instr.cond)} "
+                f"? {instr.then_target} : {instr.else_target}")
+    if isinstance(instr, IRConcat):
+        return (f"%{instr.dst.id} = concat("
+                f"{render_value(instr.left)}, {render_value(instr.right)})")
+    if isinstance(instr, IRToString):
+        return (f"%{instr.dst.id} = str({render_value(instr.value)})")
+    if isinstance(instr, IRCast):
+        return (f"%{instr.dst.id} = cast<{_fmt_type(instr.type)}>("
+                f"{render_value(instr.value)})")
+    if isinstance(instr, IRMathOp):
+        args = ", ".join(render_value(a) for a in instr.args)
+        return f"%{instr.dst.id} = {instr.op}({args})"
+    if isinstance(instr, IRVecReduce):
+        return f"%{instr.dst.id} = reduce_{instr.op}({render_value(instr.vec)})"
+    if isinstance(instr, IRSplat):
+        return f"%{instr.dst.id} = splat({render_value(instr.value)})"
+    if isinstance(instr, IRVecBinOp):
+        args = ", ".join(render_value(a) for a in instr.args)
+        return f"%{instr.dst.id} = {instr.op}({args})"
+    if isinstance(instr, IRStructInit):
+        parts = ", ".join(f".{n}={render_value(v)}"
+                          for n, v in instr.fields) or "0"
+        return f"%{instr.dst.id} = {instr.type[1]}{{ {parts} }}"
+    if isinstance(instr, IRFieldGet):
+        return (f"%{instr.dst.id} = "
+                f"{render_value(instr.base)}.{instr.field}")
+    if isinstance(instr, IRVecLit):
+        elems = ", ".join(render_value(e) for e in instr.elems)
+        return f"%{instr.dst.id} = vec[ {elems} ]"
+    if isinstance(instr, IRVecIndex):
+        return (f"%{instr.dst.id} = "
+                f"{render_value(instr.vec)}[{render_value(instr.index)}]")
+    if isinstance(instr, IRVecSet):
+        return (f"{render_value(instr.vec)}[{render_value(instr.index)}] = "
+                f"{render_value(instr.value)}")
+    if isinstance(instr, IRArrayLit):
+        elems = ", ".join(render_value(e) for e in instr.elems)
+        return f"%{instr.dst.id} = arr{{ {elems} }}"
+    if isinstance(instr, IRArrayIndex):
+        return (f"%{instr.dst.id} = "
+                f"{render_value(instr.base)}[{render_value(instr.index)}]")
+    if isinstance(instr, IRArraySet):
+        return (f"{render_value(instr.base)}"
+                f"[{render_value(instr.index)}] = {render_value(instr.value)}")
+    if isinstance(instr, IRRef):
+        return f"%{instr.dst.id} = &{render_value(instr.value)}"
+    if isinstance(instr, IRAlloc):
+        return (f"%{instr.dst.id} = alloc<{_fmt_type(instr.array_type)}>()")
+    return f"<unknown {type(instr).__name__}>"
+
+
+def render_module(module):
+    lines = []
+
+    for name, fields in module.structs.items():
+        parts = ", ".join(f"{f}: {_fmt_type(ft)}" for f, ft in fields)
+        lines.append(f"struct {name} {{ {parts} }}")
+    for name, variants in module.enums.items():
+        lines.append(f"enum {name} {{ {', '.join(variants)} }}")
+    if module.structs or module.enums:
+        lines.append("")
+
+    for f in module.funcs:
+        params = ", ".join(f"{n}: {_fmt_type(t)}" for n, t in f.params)
+        ret = _fmt_type(f.ret) if f.ret else 'void'
+        lines.append(f"fn {f.name}({params}) -> {ret} {{")
+        for block in f.blocks:
+            lines.append(f"  {block.label}:")
+            for instr in block.instrs:
+                lines.append(f"    {render_instr(instr)}")
+        lines.append("}")
+        lines.append("")
+
+    return '\n'.join(lines)

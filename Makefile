@@ -29,13 +29,12 @@ KERNEL_RT     := $(KERNEL_DIR)/src/runtime.c
 KERNEL_BOOT   := $(KERNEL_DIR)/arch/boot.S
 KERNEL_LD     := $(KERNEL_DIR)/arch/kernel.ld
 
-KERNEL_CFLAGS := -m32 -std=c11 -O$(OPT) \
-                 -ffreestanding -fno-stack-protector -fno-pic \
-                 -fno-builtin -fno-asynchronous-unwind-tables \
-                 -Wall -Wextra -Wno-unused-parameter
+KERNEL_CFLAGS := -m32 -msse2 -mfpmath=sse -mstackrealign -std=c11 -O$(OPT) \
+                 -ffreestanding -fno-stack-protector -fno-pic -fno-builtin \
+                 -fno-asynchronous-unwind-tables -Wall -Wextra -Wno-unused-parameter
 
-KERNEL_LDFLAGS := -m32 -nostdlib -nostartfiles -nodefaultlibs \
-                  -Wl,-T,$(KERNEL_LD) -Wl,--build-id=none
+KERNEL_LDFLAGS := -m32 -no-pie -nostdlib -nostartfiles -nodefaultlibs \
+                  -Wl,-T,$(KERNEL_LD) -Wl,--build-id=none                  
 
 KERNEL_LIBS   := -lgcc
 
@@ -92,6 +91,7 @@ run32: check-m32 32
 #  Kernel rules
 # ---------------------------------------------------------------------------
 kernel: check-m32 $(KERNEL_ELF)
+	@echo "kernel ready: $(KERNEL_ELF)"
 
 kernel-c: check-m32 $(KERNEL_C)
 
@@ -109,16 +109,48 @@ $(KERNEL_OUT)/runtime.o: $(KERNEL_RT)
 	@mkdir -p $(KERNEL_OUT)
 	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
 
+$(KERNEL_OUT)/interrupts.o: kernel/arch/interrupts.c
+	@mkdir -p $(KERNEL_OUT)
+	$(CC) $(KERNEL_CFLAGS) -mno-sse -mno-sse2 -mfpmath=387 -c $< -o $@
+
+$(KERNEL_OUT)/vga.o: kernel/arch/vga.c
+	@mkdir -p $(KERNEL_OUT)
+	$(CC) $(KERNEL_CFLAGS) -mno-sse -mno-sse2 -mfpmath=387 -c $< -o $@
+
+
+$(KERNEL_OUT)/multiboot.o: kernel/arch/multiboot.c
+	@mkdir -p $(KERNEL_OUT)
+	$(CC) $(KERNEL_CFLAGS) -mfpmath=387 -c $< -o $@
+
+$(KERNEL_OUT)/isr.o: kernel/arch/isr.S
+	@mkdir -p $(KERNEL_OUT)
+	$(CC) -m32 -c -fno-pic -fno-pie $< -o $@
+	
 $(KERNEL_OUT)/boot.o: $(KERNEL_BOOT)
 	@mkdir -p $(KERNEL_OUT)
-	$(CC) -m32 -c $< -o $@
+	$(CC) -m32 -c -fno-pic -fno-pie $< -o $@	
+
+MODEL ?= $(KERNEL_OUT)/test.gguf
+
+$(KERNEL_OUT)/test.gguf: tools/gen_test_gguf.py
+	@mkdir -p $(KERNEL_OUT)
+	$(PYTHON) tools/gen_test_gguf.py $@
+
+KERNEL_TEST_MODULE := $(MODEL)
 
 $(KERNEL_ELF): $(KERNEL_OUT)/boot.o \
+               $(KERNEL_OUT)/isr.o \
                $(KERNEL_OUT)/kernel.o \
                $(KERNEL_OUT)/runtime.o \
+               $(KERNEL_OUT)/interrupts.o \
+               $(KERNEL_OUT)/multiboot.o \
+               $(KERNEL_OUT)/vga.o \
                $(KERNEL_LD)
 	$(CC) $(KERNEL_LDFLAGS) -o $@ \
-	    $(KERNEL_OUT)/boot.o $(KERNEL_OUT)/kernel.o $(KERNEL_OUT)/runtime.o \
+	    $(KERNEL_OUT)/boot.o $(KERNEL_OUT)/isr.o \
+	    $(KERNEL_OUT)/kernel.o $(KERNEL_OUT)/runtime.o \
+	    $(KERNEL_OUT)/interrupts.o $(KERNEL_OUT)/multiboot.o \
+	    $(KERNEL_OUT)/vga.o \
 	    $(KERNEL_LIBS)
 	@echo "kernel built: $@"
 
@@ -128,23 +160,32 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 	@echo "flat binary: $@"
 
 # Bootable ISO via GRUB. Needs: grub-pc-bin grub-common xorriso mtools
-$(KERNEL_ISO): $(KERNEL_ELF)
+$(KERNEL_ISO): $(KERNEL_ELF) $(MODEL)
 	@mkdir -p $(KERNEL_OUT)/iso/boot/grub
 	cp $(KERNEL_ELF) $(KERNEL_OUT)/iso/boot/kernel.elf
+	cp $(MODEL) $(KERNEL_OUT)/iso/boot/model.gguf
 	printf 'set timeout=0\nset default=0\nmenuentry "Lepton OS" {\n' \
 	    > $(KERNEL_OUT)/iso/boot/grub/grub.cfg
-	printf '  multiboot /boot/kernel.elf\n  boot\n}\n' \
+	printf '  multiboot /boot/kernel.elf\n' \
 	    >> $(KERNEL_OUT)/iso/boot/grub/grub.cfg
-	grub-mkrescue -o $@ $(KERNEL_OUT)/iso >/dev/null 2>&1
+	printf '  module /boot/model.gguf\n  boot\n}\n' \
+	    >> $(KERNEL_OUT)/iso/boot/grub/grub.cfg
+	grub-mkrescue -o $@ $(KERNEL_OUT)/iso
 	@echo "iso: $@"
 
 iso: check-m32 $(KERNEL_ISO)
 
-run-kernel: check-m32 $(KERNEL_ELF)
-	$(QEMU) -kernel $(KERNEL_ELF) -serial stdio -display none -no-reboot
+# Ctrl-A (release), then X — quits QEMU
+# Ctrl-A (release), then C — switches to the QEMU monitor
+# Ctrl-A (release), then H — prints the full mux help
+
+run-kernel: check-m32 $(KERNEL_ELF) $(KERNEL_TEST_MODULE)
+	$(QEMU) -kernel $(KERNEL_ELF) -initrd $(KERNEL_TEST_MODULE) \
+	    -serial mon:stdio -display none -no-reboot
 
 run-iso: check-m32 $(KERNEL_ISO)
-	$(QEMU) -cdrom $(KERNEL_ISO) -serial stdio -no-reboot
+	$(QEMU) -cdrom $(KERNEL_ISO) -serial mon:stdio -display none -no-reboot \
+	    -boot d
 
 # ---------------------------------------------------------------------------
 #  Tests
@@ -171,6 +212,12 @@ test-all: test test-sse
 # ---------------------------------------------------------------------------
 #  Utilities
 # ---------------------------------------------------------------------------
+.PHONY: dump-ir
+
+dump-ir:
+	@test -n "$(SRC)" || { echo "usage: make dump-ir SRC=tests/cases/foo.lp"; exit 1; }
+	$(PYTHON) leptonc.py $(SRC) --dump-ir
+
 .PHONY: lint-tabs
 lint-tabs:
 	@for f in leptonc.py lepton_types.py lepton_ir.py lepton_lower.py lepton_c_ir.py; do \

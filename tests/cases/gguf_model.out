@@ -1,0 +1,12 @@
+version = 3
+tensor_count = 1
+kv_count = 0
+tensor_table_offset = 24
+data_section_offset = 64
+file_size = 128
+name_len = 7
+n_dims = 1
+dim0 = 16
+ggml_type = 0
+first = 1
+last = 16

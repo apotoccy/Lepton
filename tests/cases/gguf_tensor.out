@@ -1,0 +1,10 @@
+t0 name_len = 17
+t0 dims = 32000 4096 1 1
+t0 elements = 131072000
+t0 bytes = 524288000
+t1 name_len = 18
+t1 elements = 4096
+t1 bytes = 16384
+t2 name_len = 19
+t2 ggml_type = 8
+t2 bytes = 17825792

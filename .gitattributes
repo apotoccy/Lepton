@@ -1,0 +1,25 @@
+* text=auto eol=lf
+
+*.py text
+*.md text
+*.lp text
+*.c text
+*.h text
+*.S text
+*.ld text
+*.yml text
+*.yaml text
+Makefile text
+*.sh text
+
+# Binary assets. These are ignored by .gitignore by default, but the
+# attributes keep Git from attempting text diffs if they are added later.
+*.docx binary
+*.gguf binary
+*.iso binary
+*.bin binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary

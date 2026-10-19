@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests and kernel build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install 32-bit toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+
+      - name: Compiler tests (scalar)
+        run: make test
+
+      - name: Compiler tests (SSE2)
+        run: make test-sse
+
+      - name: Userland builds (64-bit and 32-bit)
+        run: make all
+
+      - name: Kernel build (freestanding, 32-bit)
+        run: make kernel
+
+# QEMU/inference smoke tests are intentionally not run here: they require
+# qemu-system-i386 and a GGUF model, neither of which is tracked in Git.
+# Run them locally with:
+#   make run-kernel MODEL=models/tinystories.gguf

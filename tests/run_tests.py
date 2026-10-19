@@ -39,9 +39,15 @@ def run_case(lp_file, out_file):
         )
         if r.returncode != 0:
             return False, f"compile failed:\n{r.stderr}"
-        r = subprocess.run([binary], capture_output=True, text=True, timeout=10)
-        if r.returncode != 0:
-            return False, f"runtime exit {r.returncode}:\n{r.stderr}"
+        r = subprocess.run([binary], capture_output=True, text=True,
+                           timeout=10, cwd=td)
+        exit_file = lp_file.with_suffix(".exit")
+        expected_exit = 0
+        if exit_file.exists():
+            expected_exit = int(exit_file.read_text().strip())
+        if r.returncode != expected_exit:
+            return False, (f"runtime exit {r.returncode}, "
+                           f"expected {expected_exit}:\n{r.stderr}")
         expected = out_file.read_text()
         if r.stdout != expected:
             return False, (

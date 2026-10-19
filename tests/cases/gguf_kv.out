@@ -1,0 +1,4 @@
+context_length = 2048
+alignment = 32
+missing = -1
+kv block size = 114
