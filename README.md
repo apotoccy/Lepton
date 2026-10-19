@@ -11,7 +11,7 @@ as a GRUB ISO.
 
 ## Status (as of October 2026)
 
-- **Compiler:** 70/70 regression tests pass with both the scalar and x86-64 SSE2
+- **Compiler:** 82/82 regression tests pass with both the scalar and x86-64 SSE2
   targets (`make test`, `make test-sse`).
 - **Build:** 64-bit and 32-bit userland programs build; the freestanding 32-bit
   kernel builds; the GRUB ISO builds.
@@ -31,6 +31,10 @@ as a GRUB ISO.
   and no ML framework.
 - **Custom compiler pipeline:** lexer/parser → typed flat IR → C11, with source
   spans and one lowering pipeline.
+- **Enforced declared types:** `let`/`var` annotations, assignments, call
+  arguments, return values, and struct fields must be assignable to their
+  declared types. Numeric conversions and pointer casts are inserted explicitly
+  in the IR, and array/vector literals are lowered against their target type.
 - **Hardware-oriented numerics:** `f16`, `bf16`, fixed-point `q7`/`q15`/`q31`,
   and SIMD vectors (`v2f64`, `v4f32`, `v4i32`, `v8i16`, `v16i8`). `f16`/`bf16`
   use native compiler types where available and portable fallbacks otherwise.
@@ -124,7 +128,7 @@ make test
 make test-sse
 ```
 
-Expected result for each: `70 passed, 0 failed`.
+Expected result for each: `82 passed, 0 failed`.
 
 ### 2. Build and run a userland program
 
@@ -206,10 +210,11 @@ These are the boundaries of the current implementation, not a wish list; see
   the kernel reserves 256 positions, and it does not yet check prompt or
   generation positions against the cache. Stay within the cache until the
   bound is enforced.
-- **Type annotations are not fully enforced.** Declared types are parsed and
-  resolved, but `let x: f32 = 1` currently binds an `i32`, and function
-  argument/return types are not checked. C's implicit conversions hide some
-  mismatches; they do not make the type system sound.
+- **Implicit conversions.** At an annotated boundary, numeric conversions are
+  inserted automatically, including narrowing conversions such as `i32` from
+  `f64`; pointer-to-pointer casts are also allowed for byte-buffer views. There
+  is no lossy-conversion warning yet. Array/vector literals are target-typed
+  when an annotation is present; untyped literals still infer a common type.
 - **Memory management.** The kernel uses a bump allocator with no `free` or
   reset. Commands that allocate per item (`vocab`, `encode`, `tensors`, token
   decoding) leak across REPL invocations, and not every `lp_alloc` result is

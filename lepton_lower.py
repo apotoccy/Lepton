@@ -15,7 +15,7 @@ Adding a feature:
 from __future__ import annotations
 
 from lepton_ir import (
-    IRModule, IRFunc, IRBlock, IRTemp, IRLocal, IRConst,
+    IRModule, IRFunc, IRLocal, IRConst,
     IRBind, IRAssign, IRBinOp, IRUnOp, IRCall,
     IRConcat, IRToString, IRCast, IRMathOp, IRVecReduce, IRSplat,
     IRVecBinOp, IRArrayLit, IRArrayIndex, IRArraySet, IRRef, IRAlloc,
@@ -27,7 +27,7 @@ from lepton_ir import (
 from leptonc import CompileError
 from lepton_types import (is_num, RANK, PRIMS, ts,
                           is_vector, vector_elem, vector_len, vector_of,
-                          is_array, array_elem, array_len, array_ctype_name)
+                          is_array, array_elem, array_len)
 
 
 # Source-level builtin name -> C-level name.
@@ -85,6 +85,8 @@ class Lowering:
         self.loop_stack = []
         self.declared_names = set()
         self.rename_counter = 0
+        self.current_ret = None
+        self.main_implicit_return = False
 
     # -- diagnostics ---------------------------------------------------------
     def err(self, msg, pos=None):
@@ -108,14 +110,27 @@ class Lowering:
         for it in self.items:
             if it.kind == 'fn':
                 cname = 'main' if it.name == 'main' else 'lp_' + it.name
-                f = IRFunc(it.name,
-                           [(p.name, p.type) for p in it.params],
-                           it.ret, it.pos)
+                params = []
+                for p in it.params:
+                    pt = self.resolve_type(p.type, p.pos)
+                    if pt == ('prim', 'void'):
+                        self.err(f"parameter '{p.name}' cannot have type "
+                                 f"'void'", p.pos)
+                    params.append((p.name, pt))
+                ret = self.resolve_type(it.ret, it.pos) if it.ret else None
+                f = IRFunc(it.name, params, ret, it.pos)
                 f.cname = cname
                 self.module.funcs.append(f)
             elif it.kind == 'extern':
-                self.module.externs[it.name] = (
-                    [(p.name, p.type) for p in it.params], it.ret)
+                params = []
+                for p in it.params:
+                    pt = self.resolve_type(p.type, p.pos)
+                    if pt == ('prim', 'void'):
+                        self.err(f"parameter '{p.name}' cannot have type "
+                                 f"'void'", p.pos)
+                    params.append((p.name, pt))
+                ret = self.resolve_type(it.ret, it.pos) if it.ret else None
+                self.module.externs[it.name] = (params, ret)
             elif it.kind == 'const':
                 ty = self.resolve_type(it.type, it.pos)
                 val = self.eval_const(it.value, ty)
@@ -211,20 +226,72 @@ class Lowering:
         self.declared_names = set()
         self.rename_counter = 0
         self.scopes = [{}]
+        self.loop_stack = []
+
+        if f.ret is not None:
+            f.ret = self.resolve_type(f.ret, it.pos)
+
+        resolved_params = []
+        for pname, ptype in f.params:
+            rp = self.resolve_type(ptype, it.pos)
+            if rp == ('prim', 'void'):
+                self.err(f"parameter '{pname}' cannot have type 'void'",
+                         it.pos)
+            resolved_params.append((pname, rp))
+        f.params = resolved_params
+
+        if f.ret is None:
+            self.current_ret = (('prim', 'i32') if it.name == 'main'
+                                else ('prim', 'void'))
+        else:
+            self.current_ret = f.ret
+        self.main_implicit_return = (it.name == 'main' and f.ret is None)
+
         for pname, ptype in f.params:
             # Params keep their source names but count toward declared_names
             # so a `let` in the body that shadows them gets renamed.
             self.scopes[0][pname] = (pname, ptype)
             self.declared_names.add(pname)
-        self.loop_stack = []
+
         self.block = f.add_block('entry', it.pos)
         for s in it.body.stmts:
             self.lower_stmt(s)
+
         if not self.block.is_terminated():
-            if it.name == 'main':
-                self.block.add(IRReturn(IRConst(0, ('prim', 'i32')), it.pos))
-            else:
-                self.block.add(IRReturn(None, it.pos))
+            # A merge block after an if/else where both branches return is
+            # unreachable; do not demand a return from it.
+            if self.block.label in self.reachable_blocks(f):
+                if it.name == 'main':
+                    self.block.add(IRReturn(IRConst(0, ('prim', 'i32')),
+                                            it.pos))
+                elif f.ret is None or f.ret == ('prim', 'void'):
+                    self.block.add(IRReturn(None, it.pos))
+                else:
+                    self.err(f"not all paths in function '{it.name}' return "
+                             f"a value of type '{ts(f.ret)}'", it.pos)
+
+    def reachable_blocks(self, f):
+        """Labels reachable from the entry block. Used only to avoid
+        complaining about an unreachable fallthrough merge block."""
+        by_label = {b.label: b for b in f.blocks}
+        seen = set()
+        stack = [f.entry]
+        while stack:
+            b = stack.pop()
+            if b is None or b.label in seen:
+                continue
+            seen.add(b.label)
+            for instr in b.instrs:
+                if isinstance(instr, IRReturn):
+                    break
+                if isinstance(instr, IRJump):
+                    stack.append(by_label.get(instr.target))
+                    break
+                if isinstance(instr, IRCondJump):
+                    stack.append(by_label.get(instr.then_target))
+                    stack.append(by_label.get(instr.else_target))
+                    break
+        return seen
 
     # -- statements ----------------------------------------------------------
     def lower_stmt(self, s):
@@ -237,13 +304,27 @@ class Lowering:
             return
 
         if k == 'return':
-            if s.value is None:
+            if self.main_implicit_return:
+                if s.value is None:
+                    self.block.add(IRReturn(
+                        IRConst(0, ('prim', 'i32')), s.pos))
+                else:
+                    v = self.lower_expr_as(s.value, ('prim', 'i32'),
+                                           s.value.pos, "return value")
+                    self.block.add(IRReturn(v, s.pos))
+                return
+            rt = self.current_ret
+            if rt is None or rt == ('prim', 'void'):
+                if s.value is not None:
+                    self.err("cannot return a value from a void function",
+                             s.pos)
                 self.block.add(IRReturn(None, s.pos))
-            else:
-                v = self.lower_expr(s.value)
-                if v is None:
-                    self.err("cannot return a void expression", s.pos)
-                self.block.add(IRReturn(v, s.pos))
+                return
+            if s.value is None:
+                self.err(f"function '{self.func.name}' must return a value "
+                         f"of type '{ts(rt)}'", s.pos)
+            v = self.lower_expr_as(s.value, rt, s.value.pos, "return value")
+            self.block.add(IRReturn(v, s.pos))
             return
             
         if k == 'block':
@@ -254,24 +335,31 @@ class Lowering:
             return
 
         if k == 'let':
+            declared = (self.resolve_type(s.type, s.pos)
+                        if s.type is not None else None)
+            if declared == ('prim', 'void'):
+                self.err(f"cannot declare '{s.name}' with type 'void'", s.pos)
+
             if s.value is None:
-                if s.type is None:
+                if declared is None:
                     self.err("'let' needs a type or an initialiser", s.pos)
-                t = self.resolve_type(s.type, s.pos)
-                if not (is_array(t) or t[0] == 'named'):
-                    self.err(f"'{ts(t)}' needs an initialiser", s.pos)
-                placeholder = IRConst(0, t)
-                cname = self.declare(s.name, t)
-                self.block.add(IRBind(cname, placeholder, t,
-                                      s.mutable, s.pos))
+                cname = self.declare(s.name, declared)
+                self.block.add(IRBind(cname, self.zero_const(declared),
+                                      declared, s.mutable, s.pos))
                 return
-            if s.type is not None:
-                self.resolve_type(s.type, s.pos)
-            v = self.lower_expr(s.value)
-            if v is None:
-                self.err("cannot bind a void expression to a name", s.pos)
-            cname = self.declare(s.name, v.type)
-            self.block.add(IRBind(cname, v, v.type, s.mutable, s.pos))
+
+            if declared is None:
+                v = self.lower_expr(s.value)
+                if v is None:
+                    self.err("cannot bind a void expression to a name", s.pos)
+                cname = self.declare(s.name, v.type)
+                self.block.add(IRBind(cname, v, v.type, s.mutable, s.pos))
+                return
+
+            v = self.lower_expr_as(s.value, declared, s.value.pos,
+                                   f"initializer for '{s.name}'")
+            cname = self.declare(s.name, declared)
+            self.block.add(IRBind(cname, v, declared, s.mutable, s.pos))
             return
 
         if k == 'assign':
@@ -282,10 +370,9 @@ class Lowering:
                 r = self.lookup(s.target.name)
                 if r is None:
                     self.err(f"undefined name '{s.target.name}'", s.pos)
-                cname, _ty = r
-                v = self.lower_expr(s.value)
-                if v is None:
-                    self.err("cannot assign a void expression", s.pos)
+                cname, ty = r
+                v = self.lower_expr_as(s.value, ty, s.value.pos,
+                                       f"assignment to '{s.target.name}'")
                 self.block.add(IRAssign(cname, v, s.pos))
                 return
 
@@ -303,9 +390,12 @@ class Lowering:
                 if not is_int(idx.type):
                     self.err(f"index must be an integer, "
                              f"got '{ts(idx.type)}'", s.pos)
-                v = self.lower_expr(s.value)
-                if v is None:
-                    self.err("cannot assign a void expression", s.pos)
+                et = self.index_element_type(base_type)
+                if et is None:
+                    self.not_impl(f"IR: indexed assignment to "
+                                  f"'{ts(base_type)}'")
+                v = self.lower_expr_as(s.value, et, s.value.pos,
+                                       "indexed assignment")
                 base = IRLocal(base_cname, base_type)
 
                 if is_array(base_type):
@@ -354,6 +444,75 @@ class Lowering:
             self.not_impl("IR: 'raw' blocks not yet lowered")
 
         self.not_impl(f"IR: statement '{k}' not yet lowered")
+
+    # -- type coercion -------------------------------------------------------
+    def zero_const(self, t):
+        """A zero value of type `t` for an uninitialised declaration."""
+        if t == ('prim', 'str'):
+            return IRConst("", t)
+        if t == ('prim', 'bool'):
+            return IRConst(False, t)
+        return IRConst(0, t)
+
+    def index_element_type(self, t):
+        """Element type produced by indexing a value of type `t`."""
+        if is_array(t):
+            return array_elem(t)
+        if t[0] == 'ptr' and is_array(t[1]):
+            return array_elem(t[1])
+        if t[0] == 'ptr' and t[1][0] in ('prim', 'ptr', 'named'):
+            return t[1]
+        if is_vector(t):
+            return vector_elem(t)
+        return None
+
+    def lower_expr_as(self, e, target, pos, context):
+        """Lower `e` and make it assignable to `target`.
+
+        Array and vector literals are lowered directly against the target
+        type, so `[f32; 4]` gets f32 elements rather than the literal's
+        inferred common type. Everything else is lowered normally and then
+        coerced.
+        """
+        if target is None:
+            return self.lower_expr(e)
+        if target == ('prim', 'void'):
+            self.err(f"{context} cannot have type 'void'", pos or e.pos)
+        if is_array(target) and e.kind == 'arrlit':
+            return self.lower_arrlit_as(e, target, pos)
+        if is_vector(target) and e.kind == 'veclit':
+            return self.lower_veclit_as(e, target, pos)
+        v = self.lower_expr(e)
+        if v is None:
+            self.err(f"{context} has no value", pos or e.pos)
+        return self.coerce(v, target, pos or e.pos, context)
+
+    def coerce(self, v, target, pos, context):
+        """Return `v` converted to `target`, or raise a type error.
+
+        Numeric values may be converted implicitly because the destination
+        type is explicit. Pointers may be cast through one another, which is
+        needed for byte-buffer views. Everything else must match exactly.
+        """
+        if v.type == target:
+            return v
+        if target == ('prim', 'void'):
+            self.err(f"{context} cannot have type 'void'", pos)
+        if is_num(v.type) and is_num(target):
+            tmp = self.func.new_temp(target)
+            self.block.add(IRCast(tmp, v, target, pos))
+            return tmp
+        if v.type[0] == 'ptr' and target[0] == 'ptr':
+            tmp = self.func.new_temp(target)
+            self.block.add(IRCast(tmp, v, target, pos))
+            return tmp
+        if (target[0] == 'ptr' and isinstance(v, IRConst)
+                and is_int(v.type) and v.value == 0):
+            tmp = self.func.new_temp(target)
+            self.block.add(IRCast(tmp, v, target, pos))
+            return tmp
+        self.err(f"cannot assign '{ts(v.type)}' to '{ts(target)}' "
+                 f"in {context}", pos)
 
     # -- expressions ---------------------------------------------------------
     def lower_logical(self, e, is_and):
@@ -637,12 +796,11 @@ class Lowering:
             given[a.name] = a.value
 
         fields = []
-        for fname, _ in declared:
+        for fname, ftype in declared:
             if fname in given:
-                v = self.lower_expr(given[fname])
-                if v is None:
-                    self.err(f"field '{fname}' has no value",
-                             given[fname].pos)
+                v = self.lower_expr_as(
+                    given[fname], ftype, given[fname].pos,
+                    f"field '{fname}' of struct '{name}'")
                 fields.append((fname, v))
 
         dst = self.func.new_temp(('named', name))
@@ -655,11 +813,12 @@ class Lowering:
             self.err(f"'{name}' expects {len(params)} argument(s), "
                      f"got {len(e.args)}", e.pos)
         args = []
-        for a, (_, ptype) in zip(e.args, params):
-            v = self.lower_expr(a)
-            if v is None:
-                self.err(f"argument to '{name}' has no value", a.pos)
-            args.append(v)
+        for i, (a, (_, ptype)) in enumerate(zip(e.args, params), 1):
+            if a.kind == 'namedarg':
+                self.err(f"named arguments are not supported for extern "
+                         f"'{name}'", a.pos)
+            args.append(self.lower_expr_as(
+                a, ptype, a.pos, f"argument {i} to '{name}'"))
         r = ret if ret else ('prim', 'void')
         dst = None
         if not (r[0] == 'prim' and r[1] == 'void'):
@@ -940,6 +1099,32 @@ class Lowering:
         dst = self.func.new_temp(at)
         self.block.add(IRArrayLit(dst, elems, at, e.pos))
         return dst
+
+    def lower_arrlit_as(self, e, target, pos):
+        """Lower an array literal directly against a declared array type."""
+        elem = array_elem(target)
+        count = array_len(target)
+        if len(e.elems) != count:
+            self.err(f"array literal has {len(e.elems)} element(s), "
+                     f"expected {count}", e.pos)
+        elems = [self.lower_expr_as(el, elem, el.pos, "array element")
+                 for el in e.elems]
+        dst = self.func.new_temp(target)
+        self.block.add(IRArrayLit(dst, elems, target, pos or e.pos))
+        return dst
+
+    def lower_veclit_as(self, e, target, pos):
+        """Lower a vector literal directly against a declared vector type."""
+        elem = vector_elem(target)
+        count = vector_len(target)
+        if len(e.elems) != count:
+            self.err(f"vector literal has {len(e.elems)} element(s), "
+                     f"expected {count}", e.pos)
+        elems = [self.lower_expr_as(el, elem, el.pos, "vector element")
+                 for el in e.elems]
+        dst = self.func.new_temp(target)
+        self.block.add(IRVecLit(dst, elems, target, pos or e.pos))
+        return dst
         
     def broadcast(self, v, vec_type, pos):
         """Cast scalar v to vec_type's element type and splat it."""
@@ -1095,16 +1280,21 @@ class Lowering:
                 return self.lower_extern_call(name, e)
             self.err(f"call to undefined function '{name}'", e.pos)
 
+        if len(e.args) != len(f.params):
+            self.err(f"'{name}' expects {len(f.params)} argument(s), "
+                     f"got {len(e.args)}", e.pos)
+
         args = []
-        for a in e.args:
-            v = self.lower_expr(a)
-            if v is None:
-                self.err(f"argument to '{name}' has no value", a.pos)
-            args.append(v)
+        for i, (a, (_, ptype)) in enumerate(zip(e.args, f.params), 1):
+            if a.kind == 'namedarg':
+                self.err(f"named arguments are not supported for function "
+                         f"'{name}'", a.pos)
+            args.append(self.lower_expr_as(
+                a, ptype, a.pos, f"argument {i} to '{name}'"))
 
         ret = f.ret if f.ret else ('prim', 'void')
         dst = None
-        if ret[1] != 'void':
+        if ret != ('prim', 'void'):
             dst = self.func.new_temp(ret)
         self.block.add(IRCall(dst, f.cname, args, ret, e.pos))
         return dst

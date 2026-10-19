@@ -4,14 +4,14 @@ Compiler and OS for edge AI inference, from 32-bit PCs to modern devices.
 
 ## Current status (October 2026)
 
-- **Compiler:** single IR pipeline (AST → IR → C11); 70/70 regression tests pass
+- **Compiler:** single IR pipeline (AST → IR → C11); 82/82 regression tests pass
   with the scalar and x86-64 SSE2 targets.
 - **OS:** 32-bit Multiboot kernel, GRUB ISO, QEMU boot, and an interactive REPL.
 - **Inference:** TinyStories-15M runs from a Multiboot module. The forward pass
   matches an independent reference for position 0 (token 9038) and for a
   four-token "Once upon a time" prefill (first greedy token 29892, `,`).
-- **Next focus:** enforce declared types, derive the model shape from GGUF,
-  bound context/memory, then optimize with quantized matvec.
+- **Next focus:** derive the model shape from GGUF, bound context/memory, then
+  optimize with quantized matvec.
 
 ## Verification checklist
 
@@ -39,7 +39,7 @@ compiler or standard-library code.
 
 ## 🏆 Major Milestones Achieved
 
-- **Compiler:** single IR pipeline, 70/70 tests passing on scalar and SSE2,
+- **Compiler:** single IR pipeline, 82/82 tests passing on scalar and SSE2,
   emitting portable C11.
 - **Bare-Metal AI:** a 15M-parameter TinyStories model on a 2008 Lenovo IdeaPad
   S9 (Intel Atom), with no OS, libc, or Python; reproducible in QEMU and as a
@@ -59,6 +59,11 @@ compiler or standard-library code.
       stale docstrings remain to clean up)
 - [x] Split runtime strings into `lepton_runtime.py`
 - [x] 64-bit and 32-bit userland build targets
+- [x] Declared-type enforcement for `let`/`var`, assignments, call arguments,
+      return values, and struct fields
+- [x] Target-typed array and vector literals against annotations
+- [x] Type-error regression tests and clean diagnostics
+- [x] `pyflakes`-clean compiler modules
 - [ ] Remove the remaining commented AST-emitter code and update docstrings
 
 ## Phase 1 — Numeric core ✅
@@ -146,7 +151,7 @@ Generation & Tokenizer:
 ## Phase 4 — Backends (Deferred)
 
 Trigger to resume: run on ARM (smartphones/edge) or want AVX2 speed. Do this
-after the compiler type enforcement and config-driven runtime work.
+after the config-driven runtime work.
 
 - [ ] AVX2 target (`--target avx2`)
 - [ ] NEON target for ARM (`arm-linux-gnueabihf-gcc`)
@@ -226,18 +231,18 @@ tensors, not the 15M model label.
 - [ ] Add the reference forward test (including Q/K/RoPE/attention) to the test
       suite and compare the first N greedy tokens
 
-### 3. Compiler: enforce declared types and verify the IR
+### 3. Compiler: verify the IR and finish the remaining type gaps
 
-- [ ] `let` annotations: check assignability, insert standard numeric casts, and
-      bind the declared type (currently `let x: f32 = 1` binds an `i32`)
-- [ ] Function arguments and returns: arity and type checking
-- [ ] Struct fields and array element types: check and coerce
-- [ ] Add negative tests for every new rule
+- [x] `let` annotations: check assignability, insert standard numeric casts, and
+      bind the declared type
+- [x] Function arguments and returns: arity and type checking
+- [x] Struct fields and array element types: check and coerce
+- [x] Add negative tests for every new rule
 - [ ] Add an IR verifier (operand types, terminators, unique C names)
 - [ ] Add a regression test for shadowing; manual tests currently pass for
       `if`/`else` and `for` scopes with differing types
 - [ ] Fix C typedef generation for arrays in struct fields and extern parameters
-- [ ] Clean up duplicate definitions and unused imports reported by `pyflakes`
+- [x] Clean up duplicate definitions and unused imports reported by `pyflakes`
 
 ### 4. OS UX: scrollback, history, and introspection
 
@@ -262,9 +267,11 @@ The original goal was 32-bit PCs *and* modern devices.
 
 **Compiler and language**
 
-- [ ] Declared types are parsed but not fully enforced: `let` binds the
-      initializer's inferred type, and function arguments, returns, and struct
-      fields are not type-checked
+- [ ] Numeric conversions at annotated boundaries are implicit, including
+      narrowing (for example `f64` to `i32`), and pointer-to-pointer casts are
+      allowed for byte-buffer views; there is no lossy-conversion warning
+- [ ] Untyped array/vector literals still infer a common element type; two
+      differently typed array variables cannot be converted element-wise
 - [ ] Compound assignment (`+=`, `-=`, etc.) parses but is not lowered
 - [ ] `raw` blocks parse but are not lowered
 - [ ] Arrays inside struct fields fail to compile because the emitter does not
@@ -315,8 +322,8 @@ The original goal was 32-bit PCs *and* modern devices.
 - [ ] No automated QEMU/kernel smoke test in CI
 - [ ] No deterministic generation regression test (the first greedy token after
       "Once upon a time" should be 29892)
-- [ ] No negative tests for declared types, struct arrays, or argument/return
-      checking
+- [ ] No negative tests for arrays as struct fields (the construct still fails
+      in the C emitter)
 
 ---
 
@@ -332,8 +339,9 @@ The original goal was 32-bit PCs *and* modern devices.
 - **The IR is flat.** Locals and temporaries are function-scoped and hoisted.
 - **Runtime helpers are prefixed `lp_`.** User functions are emitted as
   `lp_<name>` except `main` and externs.
-- **Type annotations are intended as contracts.** Enforcement is in progress;
-  until then, `let` annotations are not reliable.
+- **Type annotations are contracts.** Locals, assignments, arguments, returns,
+  and struct fields are checked; numeric conversions and pointer casts are
+  explicit `IRCast` nodes in the lowered program.
 - **Model shape should come from GGUF, not source forks.** The current kernel
   is a TinyStories-specific implementation moving toward a `ModelConfig`.
 - **Keep weights quantized in the hot path.** Q4_0/Q8_0 dot products are the
@@ -342,8 +350,7 @@ The original goal was 32-bit PCs *and* modern devices.
 ## Notes for Future Sessions
 
 - **Compiler checks:** run `python3 -m pyflakes lepton_*.py leptonc.py` after
-  changes. It currently reports unused imports and a few redefinitions; clean
-  those up rather than adding more.
+  changes. It is currently clean; keep it that way.
 - **Build dependencies:** use `make -B kernel` after touching `lepton_*.py` or
   `std/*.lp`; the Makefile does not track those as kernel dependencies.
 - **Real hardware:** when testing on the Lenovo, always check `[dbg: start]`

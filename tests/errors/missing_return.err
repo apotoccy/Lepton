@@ -1,0 +1,1 @@
+not all paths in function 'f' return a value of type 'i32'

@@ -1,0 +1,1 @@
+cannot assign 'str' to 'i32' in field 'x' of struct 'P'

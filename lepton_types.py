@@ -99,33 +99,6 @@ def array_ctype_name(elem_type, count):
     else:
         inner = 'unknown'
     return f"lp_arr_{inner}_{count}"
-    
-def is_array(t):
-    return t[0] == 'array'
-
-
-def array_elem(t):
-    return t[1]
-
-
-def array_len(t):
-    return t[2]
-
-
-def array_ctype_name(elem_type, count):
-    """Stable C name for a structurally-typed array. 'lp_arr_f32_16'."""
-    if elem_type[0] == 'prim':
-        inner = elem_type[1]
-    elif elem_type[0] == 'array':
-        inner = array_ctype_name(elem_type[1], elem_type[2])
-    elif elem_type[0] == 'named':
-        inner = elem_type[1]
-    elif elem_type[0] == 'ptr':
-        inner = 'ptr'
-    else:
-        inner = 'unknown'
-    return f"lp_arr_{inner}_{count}"    
-
 
 def is_num(t):
     return is_int(t) or is_quant(t) or \

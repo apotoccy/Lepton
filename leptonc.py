@@ -14,9 +14,16 @@
 # =============================================================================
 
 from __future__ import annotations
-from lepton_types import PRIMS, CTYPE, RANK, is_int, is_num, ts
+from lepton_types import PRIMS
 from pathlib import Path
 import argparse, os, subprocess, sys, tempfile
+
+# When this file is run as a script, __name__ is "__main__" while the
+# lowering/emitter passes import `leptonc` by name. Without this alias the
+# imported module gets a second CompileError class and errors raised below
+# would escape main()'s except clause as tracebacks.
+if __name__ == '__main__':
+    sys.modules.setdefault('leptonc', sys.modules[__name__])
 
 
 # =============================================================================

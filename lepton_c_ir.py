@@ -8,7 +8,7 @@ one the same way or tests/test_ir.py will catch the drift.
 """
 from __future__ import annotations
 from lepton_ir import (
-    IRModule, IRFunc, IRBlock, IRTemp, IRLocal, IRConst,
+    IRTemp, IRLocal, IRConst,
     IRBind, IRAssign, IRBinOp, IRUnOp, IRCall,
     IRConcat, IRToString, IRCast, IRMathOp, IRVecReduce, IRSplat,
     IRVecBinOp,
@@ -18,13 +18,11 @@ from lepton_ir import (
     IRReturn, IRJump, IRCondJump,
 )
 from lepton_types import (CTYPE, PRIMS, is_int, is_vector,
-                          is_array, array_elem, array_len,
-                          array_ctype_name)
+                          is_array, array_ctype_name)
 from leptonc import CompileError
 
 from lepton_runtime import (make_preamble, RUNTIME, RUNTIME_MATH,
-                             FREESTANDING_DECLS, PREAMBLE_HEAD,
-                             PREAMBLE_READ_HELPERS, PREAMBLE_VEC_OPS)
+                             FREESTANDING_DECLS)
 
 # =============================================================================
 #  Host runtime (emitted verbatim into every non-freestanding translation unit)
@@ -327,14 +325,15 @@ class CEmitter:
             return
 
         if isinstance(instr, IRBind):
-            # A placeholder bind for an aggregate (array or struct) is
-            # already satisfied by the hoisted declaration's initializer.
-            # Emitting the assignment here would produce `a = {0};`,
-            # which is not valid C in statement position.
+            # A placeholder bind for an aggregate (array, struct, or vector)
+            # is already satisfied by the hoisted declaration's initializer.
+            # Emitting the assignment here would produce `a = {0};`, which
+            # is not valid C in statement position.
             if (isinstance(instr.value, IRConst)
                     and instr.value.value == 0
                     and (is_array(instr.value.type)
-                         or instr.value.type[0] == 'named')):
+                         or instr.value.type[0] == 'named'
+                         or is_vector(instr.value.type))):
                 return
             self.emit(f"{instr.name} = {self.emit_value(instr.value)};")
             return
