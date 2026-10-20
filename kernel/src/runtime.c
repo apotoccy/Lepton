@@ -5,14 +5,15 @@ extern void vga_putc(char c);
 extern void vga_clear(void);
 
 typedef unsigned int   uint32_t;
+typedef unsigned short uint16_t;
 typedef unsigned char  uint8_t;
 typedef __SIZE_TYPE__  size_t;
 
 /* ---------- port I/O ---------- */
-static inline void outb(uint32_t port, uint8_t v) {
+static inline void outb(uint16_t port, uint8_t v) {
     __asm__ volatile("outb %0, %1" : : "a"(v), "Nd"(port));
 }
-static inline uint8_t inb(uint32_t port) {
+static inline uint8_t inb(uint16_t port) {
     uint8_t r;
     __asm__ volatile("inb %1, %0" : "=a"(r) : "Nd"(port));
     return r;
