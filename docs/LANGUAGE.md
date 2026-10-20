@@ -62,7 +62,7 @@ let e = 0.5 as q15;  // fixed-point
 let immutable = 1;       // type inferred from the initializer
 let explicit: i64 = 1;   // initializer coerced to i64
 var counter: i32 = 0;    // mutable
-var zeroed: i32;         // zero-initialized
+var pending: i32;        // must be assigned before use
 ```
 
 - `let` is immutable; assigning to it is an error. `var` is mutable.
@@ -70,8 +70,10 @@ var zeroed: i32;         // zero-initialized
 - Mutating a pointer's pointee is allowed even when the pointer binding is
   `let`: `let p = alloc([u8; 4]); p[0] = 1;` is valid, but `p = ...` is not.
 - A declared type is enforced. The initializer is converted to that type.
-- Declarations without an initializer are allowed for any non-`void` type and
-  are **zero-initialized**. There is no definite-assignment analysis.
+- Declarations without an initializer are allowed for any non-`void` type, but
+  the local must be assigned on every path before it is read. The IR verifier
+  performs this definite-assignment check. The C backend still zeroes the
+  storage as a safety net, but a read before assignment is a compile error.
 - Blocks introduce scopes. Shadowing is allowed; the compiler gives each
   binding a unique C name.
 - Top-level `const` values support literals and casts of literals.
@@ -91,7 +93,7 @@ var p = Point(x: 1, y: 2);
 p.x = 7;
 p.y += 1;               // -> 3
 
-var grid: [[i32; 2]; 2];
+var grid: [[i32; 2]; 2] = {{0, 0}, {0, 0}};
 grid[0][0] = 4;         // nested index
 
 let buf = alloc([u8; 8]);
@@ -215,7 +217,7 @@ extern fn lp_alloc(n: i64) -> ptr[u8];
 ### Arrays
 
 ```lepton
-var a: [i32; 4];                 // zero-initialized
+var a: [i32; 4] = {0, 0, 0, 0}; // explicit initializer
 let b: [f32; 4] = {1.0f, 2.0f, 3.0f, 4.0f};
 let first = b[0];
 a[1] = 7;
@@ -422,6 +424,6 @@ There is no `do`/`while` or ternary operator.
   requires an lvalue base. Pointer-expression bases are supported.
 - Struct and array ordering is rejected; only `==`/`!=` are supported.
 - Untyped array/vector literals still infer a common element type.
-- No generics, closures, or definite-assignment analysis.
+- No generics or closures.
 - Freestanding `free` is a no-op; `alloc_reset` reclaims the whole bump heap.
 - Freestanding file I/O is declared but not defined.

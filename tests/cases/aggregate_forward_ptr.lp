@@ -15,7 +15,7 @@ fn main() {
     let n = Node(next: 0, value: 7);
     println("node = {n.value}");
 
-    var a: [i32; 4];
+    var a: [i32; 4] = {0, 0, 0, 0};
     a[0] = 7;
     by_value(a);
     println("value = {a[0]}");

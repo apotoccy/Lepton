@@ -1,5 +1,5 @@
 fn main() {
-    var a: [i32; 4];
+    var a: [i32; 4] = {0, 0, 0, 0};
     for i in 0..4 {
         a[i] = i * i;
     }

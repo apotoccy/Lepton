@@ -228,6 +228,7 @@ class Verifier:
             self.verify_block(b)
 
         self.verify_fallthrough(f, f_ret)
+        self.verify_initialized(f)
 
         self.stats.functions += 1
         self.local_types = {}
@@ -278,6 +279,87 @@ class Verifier:
 
         for instr in b.instrs:
             self.verify_instr(instr)
+
+    def local_reads(self, instr):
+        """Values read by an instruction, excluding write-only aggregate bases."""
+        if isinstance(instr, (IRBind, IRAssign)):
+            return [instr.value]
+        if isinstance(instr, IRArraySet):
+            reads = [instr.index, instr.value]
+            if instr.base.type[0] == 'ptr':
+                reads.append(instr.base)
+            return reads
+        if isinstance(instr, IRVecSet):
+            return [instr.index, instr.value]
+        if isinstance(instr, IRFieldSet):
+            return [instr.value]
+        if isinstance(instr, IRDerefStore):
+            return [instr.ptr, instr.value]
+        return instr.operands()
+
+    def initialized_writes(self, instr):
+        if isinstance(instr, IRBind):
+            return [] if instr.zero_decl else [instr.name]
+        if isinstance(instr, IRAssign):
+            return [instr.name]
+        return []
+
+    def transfer_initialized(self, state, instr, report=False):
+        state = set(state)
+        for value in self.local_reads(instr):
+            if not isinstance(value, IRLocal):
+                continue
+            if (value.name in self.local_types
+                    and value.name not in state):
+                if report:
+                    self.err(f"read of uninitialized local "
+                             f"'{value.name}'", instr.pos)
+        for name in self.initialized_writes(instr):
+            state.add(name)
+        return state
+
+    def block_successors(self, b):
+        if not b.instrs:
+            return []
+        term = b.instrs[-1]
+        if isinstance(term, IRReturn):
+            return []
+        if isinstance(term, IRJump):
+            return [term.target]
+        if isinstance(term, IRCondJump):
+            return [term.then_target, term.else_target]
+        return []
+
+    def verify_initialized(self, f):
+        """Must-analysis: every local read must be initialized on all paths.
+
+        Declarations without an initializer are emitted as zero for backend
+        safety, but are treated as uninitialized here. Writes to an aggregate
+        element/field do not mark the whole aggregate initialized.
+        """
+        all_locals = set(self.local_types)
+        entry = f.entry.label
+        in_sets = {b.label: set(all_locals) for b in f.blocks}
+        in_sets[entry] = {pname for pname, _ in f.params}
+        succ = {b.label: self.block_successors(b) for b in f.blocks}
+
+        changed = True
+        while changed:
+            changed = False
+            for b in f.blocks:
+                state = set(in_sets[b.label])
+                for instr in b.instrs:
+                    state = self.transfer_initialized(state, instr)
+                for label in succ[b.label]:
+                    new = state & in_sets[label]
+                    if new != in_sets[label]:
+                        in_sets[label] = new
+                        changed = True
+
+        for b in f.blocks:
+            state = set(in_sets[b.label])
+            for instr in b.instrs:
+                state = self.transfer_initialized(state, instr, report=True)
 
     def verify_fallthrough(self, f, f_ret):
         last = f.blocks[-1]

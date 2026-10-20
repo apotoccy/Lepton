@@ -12,7 +12,7 @@ the full conversion policy and current gaps, is
 
 ## Current status
 
-- **130/130** compiler regression tests on scalar and x86-64 SSE2.
+- **134/134** compiler regression tests on scalar and x86-64 SSE2.
 - 13 IR-verifier tests and 12 conversion-policy tests.
 - 64-bit and 32-bit userland builds, freestanding 32-bit kernel, and GRUB ISO.
 - `let` immutability, compound assignment, field/index/nested lvalues.
@@ -52,7 +52,7 @@ and `$LEPTON_PATH`. Imports are flattened; circular imports are an error.
 let immutable = 1;        // inferred i32
 let explicit: i64 = 1;    // initializer converted to i64
 var counter: i32 = 0;     // mutable
-var zeroed: i32;          // zero-initialized
+var pending: i32;         // must be assigned before use
 ```
 
 - `let` bindings are immutable; assigning to one is an error.
@@ -66,8 +66,9 @@ buf[0] = 1;               // allowed
 // buf = ...;             // rejected: the binding is immutable
 ```
 
-- Locals without an initializer are zero-initialized. There is no
-  definite-assignment analysis.
+- Locals without an initializer must be assigned on every path before they are
+  read. The verifier performs definite-assignment analysis; the C backend still
+  zeroes storage as a safety net.
 - Blocks introduce scopes; shadowing is allowed.
 
 ## 3. Types
@@ -112,7 +113,7 @@ var p = Point(x: 1, y: 2);
 p.x = 7;
 p.y += 1;
 
-var grid: [[i32; 2]; 2];
+var grid: [[i32; 2]; 2] = {{0, 0}, {0, 0}};
 grid[0][0] = 4;         // nested index
 ```
 
@@ -217,7 +218,7 @@ and returns `0` on fallthrough.
 ### Arrays
 
 ```lepton
-var a: [i32; 4];                     // zero-initialized
+var a: [i32; 4] = {0, 0, 0, 0};      // explicit initializer
 let b: [f32; 4] = {1.0f, 2.0f, 3.0f, 4.0f};
 let first = b[0];
 ```
@@ -425,7 +426,7 @@ scalar target uses portable loops; the x86-64 target adds SSE2 paths.
 - Struct and array ordering (`<`, `<=`, `>`, `>=`) is rejected; equality works.
 - Untyped array/vector literals infer a common element type; array conversions
   must be explicit.
-- No generics, closures, or definite-assignment analysis.
+- No generics or closures.
 - Freestanding file I/O is declared but not defined.
 - Freestanding `free` is a no-op; `alloc_reset` reclaims the whole bump heap.
 - Only scalar and x86-64 SSE2 backends exist.

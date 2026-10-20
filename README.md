@@ -11,7 +11,7 @@ as a GRUB ISO.
 
 ## Status (as of October 2026)
 
-- **Compiler:** 130/130 regression tests pass with both the scalar and x86-64
+- **Compiler:** 134/134 regression tests pass with both the scalar and x86-64
   SSE2 targets (`make test`, `make test-sse`), plus 13 IR-verifier and 12
   conversion-policy unit tests.
 - **Build:** 64-bit and 32-bit userland programs build; the freestanding 32-bit
@@ -55,6 +55,10 @@ as a GRUB ISO.
   supported, plus structural `==`/`!=` for structs and arrays. Aggregate
   ordering is rejected with source-located errors. Strings compare by content,
   not address.
+- **Definite assignment:** every local read must be initialized on all paths.
+  Declarations without an initializer are allowed but must be assigned before
+  use through branches, loops, and `switch`. The C backend still emits zero
+  initialization as a safety net.
 - **Mutable lvalues:** `let` bindings are immutable and `var` is mutable.
   Assignment supports identifiers, fields, indices, vector lanes, nested
   lvalues, pointer-expression bases such as `(p + 1)[0] = ...`, and compound
@@ -199,9 +203,9 @@ make test
 make test-sse
 ```
 
-Expected results: `make test` reports `130 passed, 0 failed`,
+Expected results: `make test` reports `134 passed, 0 failed`,
 `IR verifier: 13 tests passed`, and `Conversion policy: 12 tests passed`;
-`make test-sse` reports `130 passed, 0 failed`.
+`make test-sse` reports `134 passed, 0 failed`.
 
 ### 2. Build and run a userland program
 
@@ -300,9 +304,6 @@ These are the boundaries of the current implementation, not a wish list; see
   integers may lose precision), and byte/void pointer views are always
   allowed. Untyped array/vector literals still infer a common type; array
   conversions are explicit (`a as [f32; N]`), not implicit.
-- **Definite assignment.** All locals are zero-initialized; there is no
-  flow-sensitive definite-assignment analysis, so reading an uninitialized
-  `var` is legal and yields zero.
 - **Memory management.** The kernel uses a bump allocator. `free` is a no-op
   in freestanding builds; `alloc_reset` reclaims the whole heap but invalidates
   every live allocation. Each REPL command marks the heap and releases its

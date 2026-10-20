@@ -587,7 +587,8 @@ class Lowering:
                     self.err("'let' needs a type or an initialiser", s.pos)
                 cname = self.declare(s.name, declared, s.mutable)
                 self.block.add(IRBind(cname, self.zero_const(declared),
-                                      declared, s.mutable, s.pos))
+                                      declared, s.mutable, s.pos,
+                                      zero_decl=True))
                 return
 
             if declared is None:

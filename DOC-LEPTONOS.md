@@ -14,7 +14,7 @@ see [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
-- Compiler: **130/130** regression tests on scalar and x86-64 SSE2, plus 13
+- Compiler: **134/134** regression tests on scalar and x86-64 SSE2, plus 13
   IR-verifier tests and 12 conversion-policy tests.
 - Build: 64-bit and 32-bit userland programs, the freestanding 32-bit kernel,
   and the GRUB ISO all build.

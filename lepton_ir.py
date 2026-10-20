@@ -91,12 +91,14 @@ class IRInstr:
 class IRBind(IRInstr):
     """Bind a value to a new named local. Corresponds to `let` / `var`."""
 
-    def __init__(self, name, value, type, mutable, pos=None):
+    def __init__(self, name, value, type, mutable, pos=None,
+                 zero_decl=False):
         super().__init__(pos)
         self.name = name
         self.value = value
         self.type = type
         self.mutable = mutable
+        self.zero_decl = zero_decl
 
     def operands(self):
         return [self.value]

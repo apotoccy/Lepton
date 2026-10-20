@@ -13,7 +13,7 @@ freestanding 32-bit kernel code.
 
 Current status:
 
-- **130/130** compiler tests on scalar and x86-64 SSE2.
+- **134/134** compiler tests on scalar and x86-64 SSE2.
 - 13 IR-verifier tests and 12 conversion-policy tests.
 - TinyStories-15M boots and runs in QEMU and on a 2008-era Lenovo IdeaPad S9.
 - `fwdpos 0 1` predicts token **9038** (`Once`), matching the Python reference.
@@ -250,7 +250,7 @@ ISO to a device and requires `sudo`; verify the device name first.
 - **Memory.** The bump allocator cannot reclaim individual blocks. Mark/release
   and `alloc_reset` invalidate allocations after their reset point, and
   `lp_alloc` null checks are incomplete.
-- **Compiler gaps.** No generics, closures, or definite-assignment analysis.
+- **Compiler gaps.** No generics or closures.
   Array/vector indexing and field assignment still require lvalue bases.
 - **File I/O.** Freestanding file I/O is declared but not defined; the kernel
   has no filesystem driver.

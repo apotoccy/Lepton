@@ -4,7 +4,7 @@ Compiler and OS for edge AI inference, from 32-bit PCs to modern devices.
 
 ## Current status (October 2026)
 
-- **Compiler:** single IR pipeline (AST → IR → verify → C11); 130/130 compiler
+- **Compiler:** single IR pipeline (AST → IR → verify → C11); 134/134 compiler
   tests pass on scalar and SSE2, plus 13 IR-verifier and 12 conversion-policy
   unit tests.
 - **OS:** 32-bit Multiboot kernel, GRUB ISO, QEMU boot, and an interactive REPL.
@@ -40,7 +40,7 @@ compiler or standard-library code.
 
 ## 🏆 Major Milestones Achieved
 
-- **Compiler:** single IR pipeline, 130/130 tests passing on scalar and SSE2
+- **Compiler:** single IR pipeline, 134/134 tests passing on scalar and SSE2
   plus 13 IR-verifier and 12 conversion-policy tests, emitting portable C11.
 - **Bare-Metal AI:** a 15M-parameter TinyStories model on a 2008 Lenovo IdeaPad
   S9 (Intel Atom), with no OS, libc, or Python; reproducible in QEMU and as a
@@ -77,6 +77,8 @@ compiler or standard-library code.
       `default`, no implicit fallthrough, and switch-aware `break`
 - [x] `raw` blocks with unary pointer loads and stores, including nested
       fields and array elements
+- [x] Flow-sensitive definite-assignment checks across branches, loops, and
+      `switch`
 - [x] Arbitrary pointer-expression lvalue bases such as `(p + 1)[0] = ...`
 - [x] Mutable lvalues: `let` immutability, field/index/nested assignment, and
       compound assignment for identifiers, indices, fields, and vector lanes
@@ -304,8 +306,6 @@ The original goal was 32-bit PCs *and* modern devices.
 
 - [ ] Integer-to-float conversions are permitted without a warning by policy;
       very wide integers can still lose precision
-- [ ] No definite-assignment analysis; all locals are zero-initialized, so
-      reading an uninitialized `var` is legal
 - [ ] Untyped array/vector literals still infer a common element type; array
       conversions are explicit (`a as [f32; N]`)
 - [ ] Kernel linear layers support Q4_0/Q8_0 weights plus F32 norms;
@@ -371,8 +371,9 @@ The original goal was 32-bit PCs *and* modern devices.
   (`lp_str_eq` / `lp_str_cmp`), not address; aggregate equality compares
   fields/elements recursively, strings by content, vectors lane-wise, and
   pointers by address, with IEEE float/NaN semantics.
-- **Locals are zero-initialized.** There is no definite-assignment analysis;
-  uninitialized declarations read as zero.
+- **Definite assignment is checked.** A local declaration without an
+  initializer must be assigned on every path before it is read; the C backend
+  still emits zero initialization as a safety net.
 - **`let` is immutable; `var` is mutable.** Parameters are mutable local
   copies. Mutating a pointer's pointee is allowed even when the pointer
   binding is `let`.

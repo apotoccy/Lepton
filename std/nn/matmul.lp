@@ -2,7 +2,12 @@
    attention block. Row-major flat arrays, passed by reference. */
 
 fn matmul4(a: ptr[[f32; 16]], b: ptr[[f32; 16]]) -> [f32; 16] {
-    var c: [f32; 16];
+    var c: [f32; 16] = {
+        0.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 0.0f,
+    };
     for i in 0..4 {
         for j in 0..4 {
             var s = 0.0f;

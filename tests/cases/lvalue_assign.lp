@@ -27,11 +27,11 @@ fn main() {
     let q = alloc([i32; 2]);
     q[0] = 10;
 
-    var grid: [[i32; 2]; 2];
+    var grid: [[i32; 2]; 2] = {{0, 0}, {0, 0}};
     grid[0][0] = 4;
     grid[1][1] += 5;
 
-    var items: [Item; 2];
+    var items: [Item; 2] = {Item(value: 0), Item(value: 0)};
     items[0] = Item(value: 1);
     items[0].value = 11;
 
