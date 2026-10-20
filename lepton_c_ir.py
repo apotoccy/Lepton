@@ -11,7 +11,7 @@ from lepton_ir import (
     IRTemp, IRLocal, IRConst,
     IRBind, IRAssign, IRBinOp, IRUnOp, IRCall,
     IRConcat, IRToString, IRCast, IRMathOp, IRVecReduce, IRSplat,
-    IRVecBinOp, IRAggregateEq, IRArrayCast,
+    IRVecBinOp, IRAggregateEq, IRArrayCast, IRDeref, IRDerefStore,
     IRArrayLit, IRArrayIndex, IRArraySet, IRRef, IRAlloc,
     IRStructInit, IRFieldGet, IRFieldSet,
     IRVecLit, IRVecIndex, IRVecSet,
@@ -801,6 +801,16 @@ class CEmitter:
             v = self.emit_value(instr.value)
             expr = self.cast_expr(v, instr.value.type, instr.type)
             self.emit(f"_t{instr.dst.id} = {expr};")
+            return
+
+        if isinstance(instr, IRDeref):
+            self.emit(f"_t{instr.dst.id} = "
+                      f"*({self.emit_value(instr.ptr)});")
+            return
+
+        if isinstance(instr, IRDerefStore):
+            self.emit(f"*({self.emit_value(instr.ptr)}) = "
+                      f"{self.emit_value(instr.value)};")
             return
 
         if isinstance(instr, IRArrayCast):

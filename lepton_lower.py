@@ -19,7 +19,7 @@ from lepton_ir import (
     IRBind, IRAssign, IRBinOp, IRUnOp, IRCall,
     IRConcat, IRToString, IRCast, IRMathOp, IRVecReduce, IRSplat,
     IRVecBinOp, IRAggregateEq, IRArrayCast, IRArrayLit, IRArrayIndex,
-    IRArraySet,
+    IRArraySet, IRDeref, IRDerefStore,
     IRRef, IRAlloc,
     IRStructInit, IRFieldGet, IRFieldSet,
     IRVecLit, IRVecIndex, IRVecSet,
@@ -114,6 +114,7 @@ class Lowering:
         self.scopes = []
         self.loop_stack = []
         self.break_stack = []
+        self.raw_depth = 0
         self.declared_names = set()
         self.mutable_names = set()
         self.rename_counter = 0
@@ -274,6 +275,7 @@ class Lowering:
         self.scopes = [{}]
         self.loop_stack = []
         self.break_stack = []
+        self.raw_depth = 0
 
         if f.ret is not None:
             f.ret = self.resolve_type(f.ret, it.pos)
@@ -358,6 +360,30 @@ class Lowering:
         Index and field bases are evaluated once. Nested aggregates are
         copied, updated, and written back through their parent.
         """
+        if e.kind == 'un' and e.op == '*':
+            if not self.raw_depth:
+                self.err("dereference requires a raw block", e.pos)
+            ptr = self.lower_expr(e.expr)
+            if ptr is None:
+                self.err("dereference needs a pointer value", e.pos)
+            if ptr.type[0] != 'ptr':
+                self.err(f"'*' requires a pointer, got '{ts(ptr.type)}'",
+                         e.pos)
+            ty = ptr.type[1]
+            if ty == ('prim', 'void'):
+                self.err("cannot dereference a void pointer", e.pos)
+
+            def read_deref():
+                tmp = self.func.new_temp(ty)
+                self.block.add(IRDeref(tmp, ptr, ty, e.pos))
+                return tmp
+
+            def write_deref(v):
+                self.block.add(IRDerefStore(ptr, v, e.pos))
+
+            return LValue(ty, read_deref, write_deref, True, False,
+                          "pointer dereference")
+
         if e.kind == 'ident':
             r = self.lookup(e.name)
             if r is None:
@@ -404,7 +430,7 @@ class Lowering:
                           False, f"field '{e.name}'")
 
         if e.kind == 'index':
-            if e.base.kind not in ('ident', 'field', 'index'):
+            if e.base.kind not in ('ident', 'field', 'index', 'un'):
                 self.not_impl("IR: indexed assignment target must be a "
                               "variable, field, or index")
             base = self.lower_lvalue(e.base, e.pos)
@@ -596,7 +622,10 @@ class Lowering:
             return
 
         if k == 'raw':
-            self.not_impl("IR: 'raw' blocks not yet lowered")
+            self.raw_depth += 1
+            self.lower_stmt(s.body)
+            self.raw_depth -= 1
+            return
 
         self.not_impl(f"IR: statement '{k}' not yet lowered")
 
@@ -1121,6 +1150,21 @@ class Lowering:
         if k == 'un':
             if e.op == '&':
                 return self.lower_ref(e)
+            if e.op == '*':
+                if not self.raw_depth:
+                    self.err("dereference requires a raw block", e.pos)
+                v = self.lower_expr(e.expr)
+                if v is None:
+                    self.err("dereference needs a pointer value", e.pos)
+                if v.type[0] != 'ptr':
+                    self.err(f"'*' requires a pointer, got '{ts(v.type)}'",
+                             e.pos)
+                ty = v.type[1]
+                if ty == ('prim', 'void'):
+                    self.err("cannot dereference a void pointer", e.pos)
+                dst = self.func.new_temp(ty)
+                self.block.add(IRDeref(dst, v, ty, e.pos))
+                return dst
             v = self.lower_expr(e.expr)
             if v is None:
                 self.err(f"'{e.op}' needs a value operand", e.pos)

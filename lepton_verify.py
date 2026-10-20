@@ -23,7 +23,8 @@ from __future__ import annotations
 from lepton_ir import (
     IRTemp, IRLocal, IRConst,
     IRBind, IRAssign, IRBinOp, IRUnOp, IRCall,
-    IRConcat, IRToString, IRCast, IRArrayCast, IRMathOp, IRVecReduce, IRSplat,
+    IRConcat, IRToString, IRCast, IRArrayCast, IRDeref, IRDerefStore,
+    IRMathOp, IRVecReduce, IRSplat,
     IRVecBinOp, IRAggregateEq, IRArrayLit, IRArrayIndex, IRArraySet,
     IRRef, IRAlloc,
     IRStructInit, IRFieldGet, IRFieldSet,
@@ -419,6 +420,31 @@ class Verifier:
                 self.err("cast target has invalid type", instr.pos)
             self.check_dst(instr, instr.type)
             self.check_value(instr.value, "cast source")
+            return
+
+        if isinstance(instr, IRDeref):
+            self.check_dst(instr, instr.type)
+            self.check_value(instr.ptr, "dereference pointer")
+            if instr.ptr.type[0] != 'ptr':
+                self.err(f"dereference of non-pointer '{ts(instr.ptr.type)}'",
+                         instr.pos)
+            pointee = instr.ptr.type[1]
+            if pointee == VOID:
+                self.err("cannot dereference a void pointer", instr.pos)
+            if instr.type != pointee:
+                self.err(f"dereference result has type '{ts(instr.type)}', "
+                         f"expected '{ts(pointee)}'", instr.pos)
+            return
+
+        if isinstance(instr, IRDerefStore):
+            self.check_value(instr.ptr, "dereference store pointer")
+            if instr.ptr.type[0] != 'ptr':
+                self.err(f"dereference store of non-pointer "
+                         f"'{ts(instr.ptr.type)}'", instr.pos)
+            pointee = instr.ptr.type[1]
+            if pointee == VOID:
+                self.err("cannot store through a void pointer", instr.pos)
+            self.check_assignable(instr.value, pointee, "dereference store")
             return
 
         if isinstance(instr, IRArrayCast):

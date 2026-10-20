@@ -12,7 +12,7 @@ the full conversion policy and current gaps, is
 
 ## Current status
 
-- **121/121** compiler regression tests on scalar and x86-64 SSE2.
+- **124/124** compiler regression tests on scalar and x86-64 SSE2.
 - 13 IR-verifier tests and 12 conversion-policy tests.
 - 64-bit and 32-bit userland builds, freestanding 32-bit kernel, and GRUB ISO.
 - `let` immutability, compound assignment, field/index/nested lvalues.
@@ -274,6 +274,24 @@ let r = &x;                  // address of a named local
 Pointers are typed with `ptr[T]`, including `ptr[[T; N]]`. Pointer comparison is
 allowed for the same pointer type. Pointer arithmetic uses element units.
 
+Unary dereference and stores through a pointer require a `raw` block:
+
+```lepton
+var x = 10;
+let p = &x;
+
+raw {
+    println("{*p}");
+    *p = 20;
+    *p += 5;
+}
+```
+
+`&` and ordinary pointer indexing do not require `raw`. The compiler still
+type-checks the pointer and stored value; null, bounds, lifetime, and aliasing
+safety remain the programmer's responsibility. `(*p).field` and `(*p)[i]` are
+supported for pointers to structs and arrays.
+
 ```lepton
 struct Point {
     x: i32;
@@ -390,7 +408,6 @@ scalar target uses portable loops; the x86-64 target adds SSE2 paths.
 
 ## 14. Current gaps
 
-- `raw` blocks are not implemented.
 - Assignment targets are limited to variables, fields, and indices;
   `(p + 1)[0] = ...` is rejected.
 - Struct and array ordering (`<`, `<=`, `>`, `>=`) is rejected; equality works.

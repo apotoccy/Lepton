@@ -261,6 +261,29 @@ per allocation and `alloc_reset` is a no-op. In freestanding builds the bump
 allocator cannot reclaim one block, so `free` is a no-op and `alloc_reset`
 reclaims everything.
 
+### Raw blocks
+
+Unary dereference and dereference stores require a `raw` block:
+
+```lepton
+var x = 10;
+let p = &x;
+
+raw {
+    println("{*p}");
+    *p = 20;
+    *p += 5;
+}
+```
+
+`*p` requires a pointer and is typed by its pointee. The block permits loads,
+stores, compound stores, and nested access such as `(*p).field` or `(*p)[i]`.
+Address-of (`&`) and ordinary pointer indexing do not require `raw`.
+
+`raw` is an unsafe boundary: the compiler still checks pointer and value types,
+but does not check null pointers, bounds, lifetimes, or aliasing. Dereferencing
+a `ptr[void]` is rejected.
+
 ### Structs
 
 ```lepton
@@ -386,9 +409,9 @@ There is no `do`/`while` or ternary operator.
 
 ## Current gaps
 
-- `raw` blocks parse but are not lowered.
-- Assignment targets are limited to variables, fields, and indices; arbitrary
-  expressions such as `(p + 1)[0] = ...` are not accepted.
+- Assignment targets are limited to variables, fields, indices, and raw
+  dereferences; arbitrary expressions such as `(p + 1)[0] = ...` are not
+  accepted.
 - Struct and array ordering is rejected; only `==`/`!=` are supported.
 - Untyped array/vector literals still infer a common element type.
 - No generics, closures, or definite-assignment analysis.

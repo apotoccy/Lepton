@@ -254,6 +254,41 @@ class IRCast(IRInstr):
         if self.value is old:
             self.value = new
          
+class IRDeref(IRInstr):
+    """dst = *ptr. `type` is the pointee type."""
+
+    def __init__(self, dst, ptr, type, pos=None):
+        super().__init__(pos)
+        self.dst = dst
+        self.ptr = ptr
+        self.type = type
+
+    def operands(self):
+        return [self.ptr]
+
+    def replace_operand(self, old, new):
+        if self.ptr is old:
+            self.ptr = new
+
+
+class IRDerefStore(IRInstr):
+    """*ptr = value. A statement: no destination."""
+
+    def __init__(self, ptr, value, pos=None):
+        super().__init__(pos)
+        self.ptr = ptr
+        self.value = value
+
+    def operands(self):
+        return [self.ptr, self.value]
+
+    def replace_operand(self, old, new):
+        if self.ptr is old:
+            self.ptr = new
+        if self.value is old:
+            self.value = new
+
+
 class IRArrayCast(IRInstr):
     """dst = element-wise cast of an array value to another array type."""
 
@@ -734,6 +769,11 @@ def render_instr(instr):
     if isinstance(instr, IRArrayCast):
         return (f"%{instr.dst.id} = array_cast<{_fmt_type(instr.type)}>("
                 f"{render_value(instr.value)})")
+    if isinstance(instr, IRDeref):
+        return (f"%{instr.dst.id} = *{render_value(instr.ptr)}")
+    if isinstance(instr, IRDerefStore):
+        return (f"*{render_value(instr.ptr)} = "
+                f"{render_value(instr.value)}")
     if isinstance(instr, IRMathOp):
         args = ", ".join(render_value(a) for a in instr.args)
         return f"%{instr.dst.id} = {instr.op}({args})"
