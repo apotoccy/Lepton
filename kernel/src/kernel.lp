@@ -147,6 +147,13 @@ fn default_model_config() -> ModelConfig {
     );
 }
 
+fn model_eos(model: ptr[u8]) -> i64 {
+    let kv_count = read_u64(model, 16);
+    let off = find_kv(model, 24, kv_count, "tokenizer.ggml.eos_token_id");
+    if (off < 0) { return 2; }
+    return read_u32(model, off) as i64;
+}
+
 /* Shape and attention requirements of the current compiled path. GQA is
    parsed but not implemented yet. Returns an empty string when supported. */
 fn config_issue(cfg: ModelConfig) -> str {
@@ -1063,7 +1070,7 @@ fn main() {
     println("[7] Enabling interrupts");
     interrupts_init();
     println("    timer at 100 Hz, keyboard ready");
-    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, gqapair, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, filetest, help");
+    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, gqapair, generate [T] [K] [N], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, filetest, help");
     println("");
 
     var line_buf = alloc([u8; 128]) as ptr[u8];
@@ -1417,15 +1424,23 @@ fn main() {
                         }
                         var gen_temp: f32 = 1.0f;
                         var gen_k: i64 = 40;
+                        var gen_n: i64 = 30;
                         if (text[8] == ' ') {
                             gen_temp = parse_float_at(text, 9);
                             let tend = parse_float_end(text, 9);
                             let k_arg = parse_int_at(text, tend);
                             if (k_arg > 0) { gen_k = k_arg; }
+                            let k_end = parse_int_end(text, tend);
+                            let n_arg = parse_int_at(text, k_end);
+                            if (n_arg > 0) { gen_n = n_arg; }
                         }
                         lp_rand_seed(ticks() + 1 as u32);
                         let gen_m = mb_module_start(0 as u32) as ptr[u8];
                         let gen_cfg = model_config(gen_m);
+                        if (gen_n > gen_cfg.max_seq) {
+                            gen_n = gen_cfg.max_seq;
+                        }
+                        let gen_eos = model_eos(gen_m);
 
                         println("  Model starts at RAM address: {mb_module_start(0 as u32)}");
 
@@ -1435,14 +1450,14 @@ fn main() {
                                    active_cfg.n_layer, active_cfg.max_seq,
                                    active_cfg.n_head_kv * active_cfg.head_dim);
 
-                        println("  generating 30 tokens (temp={gen_temp}, top_k={gen_k})...");
-                        print("  [dbg: start] ");
+                        println("  generating {gen_n} tokens (temp={gen_temp}, top_k={gen_k})...");
+                        print("  ");
 
                         var cur: u32 = 1 as u32;
-                        for step in 0..30 {
-                            if (step >= gen_cfg.max_seq) { break; }
+                        var gen_step: i64 = 0;
+                        while (gen_step < gen_n && gen_step < gen_cfg.max_seq) {
                             if (!forward_token_at_pos(gen_m, gen_cfg,
-                                                      cur as i64, step,
+                                                      cur as i64, gen_step,
                                                       gen_w, gen_a,
                                                       kv_k_buf, kv_v_buf,
                                                       rope_freqs, logits_buf)) {
@@ -1450,8 +1465,10 @@ fn main() {
                             }
                             cur = lp_sample(logits_buf, gen_cfg.vocab_size as i32,
                                             gen_temp, gen_k as i32);
+                            if (cur as i64 == gen_eos) { break; }
                             let gs = decode_tok(gen_m, tok_table, tok_count, cur);
                             print_token(gs);
+                            gen_step = gen_step + 1;
                         }
                         println("");
                     }
@@ -1514,15 +1531,18 @@ fn main() {
                             let gp_buf = alloc([u8; 512]) as ptr[u8];
                             let gp_end = parse_quoted(text, 9, gp_buf, 253);
                             if (gp_end < 0) {
-                                println("  usage: genprompt \"text\" [temp] [top_k]");
+                                println("  usage: genprompt \"text\" [temp] [top_k] [n]");
                             } else {
                                 var gp_t: f64 = 1.0;
                                 var gp_k: i64 = 40;
+                                var gp_n: i64 = 30;
                                 gp_t = parse_float_at(text, gp_end) as f64;
                                 let gp_tend = parse_float_end(text, gp_end);
                                 let gp_kval = parse_int_at(text, gp_tend);
                                 if (gp_kval > 0) { gp_k = gp_kval; }
-                                if (gp_t <= 0.0) { gp_t = 1.0; }
+                                let gp_kend = parse_int_end(text, gp_tend);
+                                let gp_nval = parse_int_at(text, gp_kend);
+                                if (gp_nval > 0) { gp_n = gp_nval; }
                                 let gp_m = mb_module_start(0 as u32) as ptr[u8];
                                 let gp_cfg = model_config(gp_m);
                                 let gp_w = scratch_bytes as ptr[f32];
@@ -1539,6 +1559,11 @@ fn main() {
                                                        gp_ids);
                                 if (gp_len > gp_cfg.max_seq) {
                                     println("  inference error: prompt has {gp_len} tokens; context is {gp_cfg.max_seq}");
+                                } else {
+                                let gp_remaining = gp_cfg.max_seq - gp_len;
+                                if (gp_n > gp_remaining) { gp_n = gp_remaining; }
+                                if (gp_n <= 0) {
+                                    println("  inference error: prompt fills the context");
                                 } else {
                                 println("  prompt = {gp_len} tokens");
                                 /* Echo back what we decoded, to check roundtrip */
@@ -1575,37 +1600,39 @@ fn main() {
 
                                 /* Generate */
                                 if (gp_ok == 1) {
-                                println("  generating 30 tokens (temp={gp_t}, top_k={gp_k})...");
-                                print("  ");
-                                var gp_next: u32 = lp_sample(logits_buf, gp_cfg.vocab_size as i32,
-                                                              gp_t as f32, gp_k as i32);
-                                let gp_s0 = decode_tok(gp_m, tok_table, tok_count, gp_next);
-                                print_token(gp_s0);
-
-                                var gp_g: i64 = 1;
-                                while (gp_g < 30) {
-                                    if (gp_pos >= gp_cfg.max_seq) { break; }
-                                    if (!forward_token_at_pos(gp_m, gp_cfg,
-                                                              gp_next as i64, gp_pos,
-                                                              gp_w, gp_a,
-                                                              kv_k_buf, kv_v_buf,
-                                                              rope_freqs,
-                                                              logits_buf)) {
-                                        break;
+                                    let gp_eos = model_eos(gp_m);
+                                    println("  generating {gp_n} tokens (temp={gp_t}, top_k={gp_k})...");
+                                    print("  ");
+                                    var gp_g: i64 = 0;
+                                    while (gp_g < gp_n && gp_pos < gp_cfg.max_seq) {
+                                        let gp_next = lp_sample(
+                                            logits_buf,
+                                            gp_cfg.vocab_size as i32,
+                                            gp_t as f32, gp_k as i32);
+                                        if (gp_next as i64 == gp_eos) { break; }
+                                        let gp_s = decode_tok(gp_m, tok_table,
+                                                              tok_count, gp_next);
+                                        print_token(gp_s);
+                                        gp_g = gp_g + 1;
+                                        if (gp_g >= gp_n) { break; }
+                                        if (!forward_token_at_pos(gp_m, gp_cfg,
+                                                                  gp_next as i64,
+                                                                  gp_pos,
+                                                                  gp_w, gp_a,
+                                                                  kv_k_buf, kv_v_buf,
+                                                                  rope_freqs,
+                                                                  logits_buf)) {
+                                            break;
+                                        }
+                                        gp_pos = gp_pos + 1;
                                     }
-                                    gp_next = lp_sample(logits_buf, gp_cfg.vocab_size as i32,
-                                                        gp_t as f32, gp_k as i32);
-                                    let gp_sn = decode_tok(gp_m, tok_table, tok_count, gp_next);
-                                    print_token(gp_sn);
-                                    gp_pos = gp_pos + 1;
-                                    gp_g = gp_g + 1;
+                                    println("");
                                 }
-                                println("");
+                                }
                                 }
                                 }
                             }
                         }
-                    }
                 } else if (starts_with(text, "reset") && (text[5] == '\0' || text[5] == ' ')) {
                     clear_kv_cache(kv_k_buf, kv_v_buf,
                                    active_cfg.n_layer, active_cfg.max_seq,
@@ -1622,7 +1649,7 @@ fn main() {
                     let wr = write_file("test.bin", fbuf, 4);
                     println("  file_size={fs} read={rd} write={wr}");
                 } else if (starts_with(text, "help")) {
-                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, gqapair, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, filetest, help");
+                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, gqapair, generate [T] [K] [N], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, filetest, help");
                 } else if (line_len > 0) {
                     println("  {text}");
                 }

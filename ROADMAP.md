@@ -168,16 +168,15 @@ Dequantization & Math:
 
 Generation & Tokenizer:
 
-- [x] Autoregressive generation (`generate`/`genprompt` currently produce a
-      fixed 30 tokens; variable length is pending)
+- [x] Autoregressive generation with configurable length and EOS stopping
+      (`generate`/`genprompt` default to 30 tokens)
 - [x] Sampling: temperature, top-k, xorshift32 PRNG
 - [x] Tokenizer decode (BPE vocab offsets, U+2581 substitution)
 - [x] Tokenizer encode (BPE merges path plus greedy fallback) with bounded
       vocab/piece buffers and `<0xNN>` byte fallback; the merge path is still
       untested on TinyStories because it has no merges
-- [x] Prompt-based generation (`genprompt "..." T K`); note that `T <= 0` is
-      currently coerced to `1.0`, so use a small positive temperature such as
-      `0.001` for greedy output
+- [x] Prompt-based generation (`genprompt "..." T K N`), with temperature
+      `0` selecting greedy output
 - [x] Tokenizer byte fallback to `<0xNN>` vocabulary entries
 - [x] Bounds-safe token table, decode IDs, merge table, and piece buffers
 - [ ] Test the BPE merge path with a model that has merges
@@ -332,8 +331,6 @@ The original goal was 32-bit PCs *and* modern devices.
 - [x] Architecture-aware GGUF config keys and tensor-shape fallbacks
 - [ ] No keyboard LED control (caps lock)
 - [ ] Ring buffer drops input silently on overflow (128 chars max)
-- [ ] `generate`/`genprompt` are fixed at 30 tokens
-- [ ] `genprompt ... 0` is coerced to temperature 1.0; use `0.001` for greedy
 
 **Tooling and testing**
 

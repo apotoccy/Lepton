@@ -99,19 +99,18 @@ line editing.
 
 ### Generation and reset
 
-- `generate [temp] [top_k]` — 30 tokens from BOS. `generate 0` selects the
-  greedy path.
-- `genprompt "<text>" [temp] [top_k]` — encode a prompt, prefill, and generate
-  30 continuation tokens. Use a small positive temperature such as `0.001` for
-  deterministic output; a literal `0` is currently coerced to `1.0`.
+- `generate [temp] [top_k] [n]` — `n` tokens from BOS, default 30.
+  `generate 0` selects the greedy path.
+- `genprompt "<text>" [temp] [top_k] [n]` — encode a prompt, prefill, and
+  generate `n` continuation tokens. Temperature `0` is greedy.
 - `reset` — clear the KV cache without rebooting.
 - `reboot` — reset the machine; Ctrl+Alt+Del also works.
 - `poweroff` — power down through ACPI when the firmware exposes it.
 
-Both generation commands are fixed at 30 tokens. `generate`, `genprompt`, and
-`fwdpos` clear the KV cache before they run, and `reset` provides an explicit
-cleanup command. Each REPL command also reclaims its transient heap allocations
-with an allocator mark/release around the command.
+Generation stops at EOS or when the configured context is full. `generate`,
+`genprompt`, and `fwdpos` clear the KV cache before they run, and `reset`
+provides an explicit cleanup command. Each REPL command also reclaims its
+transient heap allocations with an allocator mark/release around the command.
 
 Configuration parsing is architecture-aware and falls back to tensor shapes
 when metadata keys are missing. Configuration and inference problems

@@ -267,10 +267,15 @@ poweroff
 filetest
 ```
 
-`generate 0` selects the greedy path. `genprompt ... 0` is currently coerced to
-temperature 1.0, so use a small positive temperature such as `0.001` for
-deterministic generation. Both `generate` and `genprompt` currently produce 30
-tokens.
+`generate 0` and `genprompt ... 0` select the greedy path. Both commands accept
+an optional third numeric argument for the token count, defaulting to 30:
+
+```text
+generate 0 1 5
+genprompt "Once upon a time" 0 1 5
+```
+
+Generation stops at EOS or when the configured context is full.
 
 To quit QEMU: press `Ctrl-A`, release, then `X`.
 
