@@ -19,6 +19,7 @@ extern fn lp_rand_seed(s: u32) -> void;
 extern fn mb_module_end(idx: u32) -> u32;
 extern fn lp_alloc_init(start: ptr[u8], size: i64) -> void;
 extern fn lp_alloc_bytes(n: i64) -> ptr[u8];
+extern fn lp_reboot() -> void;
 
 
 fn starts_with(s: str, prefix: str) -> bool {
@@ -138,18 +139,27 @@ fn default_model_config() -> ModelConfig {
 }
 
 /* Shape and attention requirements of the current compiled path. GQA is
-   parsed but not implemented yet. */
-fn config_supported(cfg: ModelConfig) -> bool {
-    if (cfg.n_embd <= 0 || cfg.n_embd % 32 != 0) { return false; }
-    if (cfg.n_ff <= 0) { return false; }
-    if (cfg.n_layer <= 0) { return false; }
-    if (cfg.n_head <= 0 || cfg.n_head_kv != cfg.n_head) { return false; }
-    if (cfg.head_dim <= 0) { return false; }
-    if (cfg.n_head * cfg.head_dim != cfg.n_embd) { return false; }
-    if (cfg.max_seq <= 0 || cfg.max_seq > 256) { return false; }
-    if (cfg.vocab_size <= 0) { return false; }
-    if (cfg.rms_eps <= 0.0f) { return false; }
-    return true;
+   parsed but not implemented yet. Returns an empty string when supported. */
+fn config_issue(cfg: ModelConfig) -> str {
+    if (cfg.n_embd <= 0) { return "invalid n_embd"; }
+    if (cfg.n_embd % 32 != 0) { return "n_embd is not a multiple of 32"; }
+    if (cfg.n_ff <= 0) { return "invalid n_ff"; }
+    if (cfg.n_layer <= 0) { return "invalid n_layer"; }
+    if (cfg.n_head <= 0) { return "invalid n_head"; }
+    if (cfg.n_head_kv != cfg.n_head) {
+        return "GQA is not implemented (n_head_kv != n_head)";
+    }
+    if (cfg.head_dim <= 0) { return "invalid head_dim"; }
+    if (cfg.n_head * cfg.head_dim != cfg.n_embd) {
+        return "n_head * head_dim != n_embd";
+    }
+    if (cfg.max_seq <= 0) { return "invalid context length"; }
+    if (cfg.max_seq > 256) {
+        return "context length exceeds the 256-position cap";
+    }
+    if (cfg.vocab_size <= 0) { return "invalid vocabulary size"; }
+    if (cfg.rms_eps <= 0.0f) { return "invalid RMS epsilon"; }
+    return "";
 }
 
 fn config_memory_bytes(cfg: ModelConfig) -> i64 {
@@ -304,12 +314,19 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
                         wbuf: ptr[f32], act: ptr[f32],
                         kv_k: ptr[f32], kv_v: ptr[f32],
                         freqs: ptr[f64],
-                        logits: ptr[f32]) -> void {
-    if (!config_supported(cfg) || !config_fits(cfg)) {
-        panic("unsupported model architecture or workspace does not fit");
+                        logits: ptr[f32]) -> bool {
+    let issue = config_issue(cfg);
+    if (issue != "") {
+        println("  inference error: {issue}");
+        return false;
+    }
+    if (!config_fits(cfg)) {
+        println("  inference error: workspace needs {config_memory_bytes(cfg)} bytes; budget is 62914560");
+        return false;
     }
     if (pos < 0 || pos >= cfg.max_seq) {
-        panic("context position out of range");
+        println("  inference error: context position {pos} is outside 0..{cfg.max_seq - 1}");
+        return false;
     }
     let data_start = model_data_start(model);
     let tc = read_u64(model, 8);
@@ -441,7 +458,8 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
     let ow_t = tensor_by_name(model, tstart, tc, "output.weight");
     let v_size = ow_t.dim1 as i64;
     if (v_size > cfg.vocab_size) {
-        panic("output vocabulary exceeds configured vocabulary");
+        println("  inference error: output vocabulary {v_size} exceeds configured {cfg.vocab_size}");
+        return false;
     }
     for vv in 0..v_size {
         if (ow_t.ggml_type == 2 as u32) {
@@ -458,6 +476,7 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
         }
         logits[vv] = lp_dot;
     }
+    return true;
 }
 
 fn parse_float_at(text: str, start: i64) -> f32 {
@@ -961,7 +980,7 @@ fn main() {
     println("[7] Enabling interrupts");
     interrupts_init();
     println("    timer at 100 Hz, keyboard ready");
-    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, filetest, help");
+    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, filetest, help");
     println("");
 
     var line_buf = alloc([u8; 128]) as ptr[u8];
@@ -1147,10 +1166,13 @@ fn main() {
                         let cm = mb_module_start(0 as u32) as ptr[u8];
                         let cfg = model_config(cm);
                         print_model_config(cfg);
-                        if (config_supported(cfg) && config_fits(cfg)) {
-                            println("  inference = supported");
+                        let issue = config_issue(cfg);
+                        if (issue != "") {
+                            println("  inference = unsupported: {issue}");
+                        } else if (!config_fits(cfg)) {
+                            println("  inference = unsupported: workspace needs {config_memory_bytes(cfg)} bytes; budget is 62914560");
                         } else {
-                            println("  inference = unsupported by this build");
+                            println("  inference = supported");
                         }
                     }
                 } else if (starts_with(text, "tensors") && (text[7] == '\0' || text[7] == ' ')) {
@@ -1222,19 +1244,16 @@ fn main() {
                         }
                         let fwd_model = mb_module_start(0 as u32) as ptr[u8];
                         let fwd_cfg = model_config(fwd_model);
-                        if (!config_supported(fwd_cfg) || !config_fits(fwd_cfg)) {
-                            println("  unsupported model shape");
-                        } else {
-                            let fwd_buf = scratch_bytes as ptr[f32];
-                            println("  running forward for token <s> (id 1)...");
-                            clear_kv_cache(kv_k_buf, kv_v_buf,
-                                           active_cfg.n_layer,
-                                           active_cfg.max_seq,
-                                           active_cfg.n_embd);
-                            forward_token_at_pos(fwd_model, fwd_cfg, 1, 0,
+                        let fwd_buf = scratch_bytes as ptr[f32];
+                        println("  running forward for token <s> (id 1)...");
+                        clear_kv_cache(kv_k_buf, kv_v_buf,
+                                       active_cfg.n_layer,
+                                       active_cfg.max_seq,
+                                       active_cfg.n_embd);
+                        if (forward_token_at_pos(fwd_model, fwd_cfg, 1, 0,
                                                  fwd_buf, activation_buf,
                                                  kv_k_buf, kv_v_buf,
-                                                 rope_freqs, logits_buf);
+                                                 rope_freqs, logits_buf)) {
                             let fwd_best = lp_argmax(logits_buf,
                                                      fwd_cfg.vocab_size as i32);
                             println("  predicted token = {fwd_best}");
@@ -1262,18 +1281,21 @@ fn main() {
                         let fp_w = scratch_bytes as ptr[f32];
                         let fp_a = activation_buf as ptr[f32];
                         clear_kv_cache(kv_k_buf, kv_v_buf,
-                                   active_cfg.n_layer, active_cfg.max_seq,
-                                   active_cfg.n_embd);
-                        forward_token_at_pos(fp_m, fp_cfg, fp_tok, fp_pos,
-                                             fp_w, fp_a,
-                                             kv_k_buf, kv_v_buf, rope_freqs,
-                                             logits_buf);
-                        let fp_best = lp_argmax(logits_buf, fp_cfg.vocab_size as i32);
-                        println("  pos={fp_pos} token={fp_tok} -> {fp_best}");
-                        let fp_s = decode_tok(fp_m, tok_table, fp_best);
-                        print("  '");
-                        print_token(fp_s);
-                        println("'");
+                                       active_cfg.n_layer,
+                                       active_cfg.max_seq,
+                                       active_cfg.n_embd);
+                        if (forward_token_at_pos(fp_m, fp_cfg, fp_tok, fp_pos,
+                                                 fp_w, fp_a,
+                                                 kv_k_buf, kv_v_buf,
+                                                 rope_freqs, logits_buf)) {
+                            let fp_best = lp_argmax(logits_buf,
+                                                     fp_cfg.vocab_size as i32);
+                            println("  pos={fp_pos} token={fp_tok} -> {fp_best}");
+                            let fp_s = decode_tok(fp_m, tok_table, fp_best);
+                            print("  '");
+                            print_token(fp_s);
+                            println("'");
+                        }
                     }
                 } else if (starts_with(text, "generate") && (text[8] == '\0' || text[8] == ' ')) {
                     if (mb_module_count() == 0 as u32) {
@@ -1310,10 +1332,13 @@ fn main() {
                         var cur: u32 = 1 as u32;
                         for step in 0..30 {
                             if (step >= gen_cfg.max_seq) { break; }
-                            forward_token_at_pos(gen_m, gen_cfg, cur as i64, step,
-                                                 gen_w, gen_a,
-                                                 kv_k_buf, kv_v_buf, rope_freqs,
-                                                 logits_buf);
+                            if (!forward_token_at_pos(gen_m, gen_cfg,
+                                                      cur as i64, step,
+                                                      gen_w, gen_a,
+                                                      kv_k_buf, kv_v_buf,
+                                                      rope_freqs, logits_buf)) {
+                                break;
+                            }
                             cur = lp_sample(logits_buf, gen_cfg.vocab_size as i32,
                                             gen_temp, gen_k as i32);
                             let gs = decode_tok(gen_m, tok_table, cur);
@@ -1404,8 +1429,8 @@ fn main() {
                                                        gp_buf, 0 as i64, gp_i,
                                                        gp_ids);
                                 if (gp_len > gp_cfg.max_seq) {
-                                    panic("prompt exceeds model context length");
-                                }
+                                    println("  inference error: prompt has {gp_len} tokens; context is {gp_cfg.max_seq}");
+                                } else {
                                 println("  prompt = {gp_len} tokens");
                                 /* Echo back what we decoded, to check roundtrip */
                                 print("  enc: ");
@@ -1423,17 +1448,24 @@ fn main() {
                                 lp_rand_seed(ticks() + 1 as u32);
 
                                 /* Run forward on prompt tokens */
+                                var gp_ok: i32 = 1;
                                 var gp_pos: i64 = 0;
                                 while (gp_pos < gp_len) {
-                                    forward_token_at_pos(gp_m, gp_cfg,
-                                                         gp_ids[gp_pos] as i64, gp_pos,
-                                                         gp_w, gp_a,
-                                                         kv_k_buf, kv_v_buf, rope_freqs,
-                                                         logits_buf);
+                                    if (!forward_token_at_pos(gp_m, gp_cfg,
+                                                              gp_ids[gp_pos] as i64,
+                                                              gp_pos,
+                                                              gp_w, gp_a,
+                                                              kv_k_buf, kv_v_buf,
+                                                              rope_freqs,
+                                                              logits_buf)) {
+                                        gp_ok = 0;
+                                        break;
+                                    }
                                     gp_pos = gp_pos + 1;
                                 }
 
                                 /* Generate */
+                                if (gp_ok == 1) {
                                 println("  generating 30 tokens (temp={gp_t}, top_k={gp_k})...");
                                 print("  ");
                                 var gp_next: u32 = lp_sample(logits_buf, gp_cfg.vocab_size as i32,
@@ -1444,11 +1476,14 @@ fn main() {
                                 var gp_g: i64 = 1;
                                 while (gp_g < 30) {
                                     if (gp_pos >= gp_cfg.max_seq) { break; }
-                                    forward_token_at_pos(gp_m, gp_cfg,
-                                                         gp_next as i64, gp_pos,
-                                                         gp_w, gp_a,
-                                                         kv_k_buf, kv_v_buf, rope_freqs,
-                                                         logits_buf);
+                                    if (!forward_token_at_pos(gp_m, gp_cfg,
+                                                              gp_next as i64, gp_pos,
+                                                              gp_w, gp_a,
+                                                              kv_k_buf, kv_v_buf,
+                                                              rope_freqs,
+                                                              logits_buf)) {
+                                        break;
+                                    }
                                     gp_next = lp_sample(logits_buf, gp_cfg.vocab_size as i32,
                                                         gp_t as f32, gp_k as i32);
                                     let gp_sn = decode_tok(gp_m, tok_table, gp_next);
@@ -1457,6 +1492,8 @@ fn main() {
                                     gp_g = gp_g + 1;
                                 }
                                 println("");
+                                }
+                                }
                             }
                         }
                     }
@@ -1465,6 +1502,8 @@ fn main() {
                                    active_cfg.n_layer, active_cfg.max_seq,
                                    active_cfg.n_embd);
                     println("  kv cache reset");
+                } else if (starts_with(text, "reboot")) {
+                    lp_reboot();
                 } else if (starts_with(text, "filetest")) {
                     let fs = file_size("test.bin");
                     let fbuf = alloc([u8; 4]);
@@ -1472,7 +1511,7 @@ fn main() {
                     let wr = write_file("test.bin", fbuf, 4);
                     println("  file_size={fs} read={rd} write={wr}");
                 } else if (starts_with(text, "help")) {
-                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, filetest, help");
+                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, filetest, help");
                 } else if (line_len > 0) {
                     println("  {text}");
                 }

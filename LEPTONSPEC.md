@@ -202,7 +202,8 @@ The merge path exists but is untested on TinyStories, which has no merges.
 ### 5.2 Drivers
 
 - VGA text console, 80x25 at `0xB8000`.
-- PS/2 keyboard, scancode set 1, Shift support, 256-byte ring buffer.
+- PS/2 keyboard, scancode set 1, Shift/Ctrl/Alt support, Ctrl+Alt+Del reboot,
+  and a 256-byte ring buffer.
 - COM1 serial at 38400 baud for headless QEMU.
 - PIT at 100 Hz.
 - PIC remapped to `0x20`-`0x2F`.
@@ -214,7 +215,11 @@ include:
 
 - inspection: `info`, `config`, `tensors`, `modules`, `matvec`;
 - tokenizer: `vocab`, `decodetok`, `encode`;
-- generation: `generate`, `genprompt`, `fwdpos`, `forward`.
+- generation: `generate`, `genprompt`, `fwdpos`, `forward`;
+- maintenance: `reset` (KV cache), `reboot` (or Ctrl+Alt+Del), `filetest`.
+
+Expected configuration/inference errors are soft errors that return to the
+prompt. Fatal panics print a Ctrl+Alt+Del reboot hint.
 
 `config` parses and prints GGUF hyperparameters and reports whether the
 compiled inference path supports the shape. Activation, KV, logits, and

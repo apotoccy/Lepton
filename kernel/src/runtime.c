@@ -124,6 +124,13 @@ void lp_println(const char *s) {
 __attribute__((noreturn)) void lp_panic(const char *s) {
     lp_print("PANIC: ");
     lp_println(s);
+    lp_println("Ctrl+Alt+Del to reboot");
+    for (;;) __asm__ volatile("sti; hlt");
+}
+
+__attribute__((noreturn)) void lp_reboot(void) {
+    lp_println("rebooting...");
+    outb(0x64, 0xFE);
     for (;;) __asm__ volatile("cli; hlt");
 }
 

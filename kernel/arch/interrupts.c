@@ -166,6 +166,10 @@ static volatile uint32_t tick_count = 0;
 
 /* ---- Keyboard ---- */
 static u8 shift_down = 0;
+static u8 ctrl_down = 0;
+static u8 alt_down = 0;
+
+extern void lp_reboot(void);
 
 /* Scancode set 1 (make codes). Index is the raw scancode 0x00..0x7F.
    Zero entries are keys we don't handle yet (F-keys, arrows, ctrl, alt). */
@@ -228,6 +232,11 @@ static void kbd_emit(char c) {
 static void kbd_handle(u8 sc) {
     if (sc == 0x2A || sc == 0x36) { shift_down = 1; return; }
     if (sc == 0xAA || sc == 0xB6) { shift_down = 0; return; }
+    if (sc == 0x1D) { ctrl_down = 1; return; }
+    if (sc == 0x9D) { ctrl_down = 0; return; }
+    if (sc == 0x38) { alt_down = 1; return; }
+    if (sc == 0xB8) { alt_down = 0; return; }
+    if (sc == 0x53 && ctrl_down && alt_down) { lp_reboot(); }
     if (sc & 0x80) return;
     char c = shift_down ? kbd_shift[sc] : kbd_normal[sc];
     if (c == 0) return;

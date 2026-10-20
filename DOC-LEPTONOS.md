@@ -44,8 +44,9 @@ Lepton OS is a monolithic 32-bit kernel using the **Multiboot 1** specification.
 
 - **VGA text console.** 80x25 text at `0xB8000`, with scrolling, cursor
   tracking, and color attributes.
-- **PS/2 keyboard.** Scancode Set 1 with Shift handling; keystrokes go into a
-  256-byte ring buffer. The REPL line buffer is 128 bytes.
+- **PS/2 keyboard.** Scancode Set 1 with Shift, Ctrl, and Alt tracking;
+  Ctrl+Alt+Del reboots. Keystrokes go into a 256-byte ring buffer. The REPL
+  line buffer is 128 bytes.
 - **Serial (COM1).** 38400 baud, mirroring screen output and accepting input.
   Used for headless QEMU sessions.
 - **PIT.** IRQ 0 at 100 Hz.
@@ -85,6 +86,7 @@ line editing.
 - `modules` — physical addresses and sizes of loaded Multiboot modules.
 - `matvec` — diagnostic matrix-vector multiplication on the first tensor.
 - `filetest` — exercise the freestanding file I/O failure contract.
+- `reboot` — reboot the machine; Ctrl+Alt+Del does the same from the keyboard.
 
 ### Tokenizer
 
@@ -100,11 +102,17 @@ line editing.
   30 continuation tokens. Use a small positive temperature such as `0.001` for
   deterministic output; a literal `0` is currently coerced to `1.0`.
 - `reset` — clear the KV cache without rebooting.
+- `reboot` — reset the machine; Ctrl+Alt+Del also works.
 
 Both generation commands are fixed at 30 tokens. `generate`, `genprompt`, and
 `fwdpos` clear the KV cache before they run, and `reset` provides an explicit
 cleanup command. Each REPL command also reclaims its transient heap allocations
 with an allocator mark/release around the command.
+
+Configuration and inference problems (unsupported shapes, workspace budget,
+context bounds) are reported as soft errors and return to the prompt. A fatal
+panic prints `Ctrl+Alt+Del to reboot` and enables interrupts so the keyboard
+reset combination can recover the machine.
 
 ## 5. Building and running
 

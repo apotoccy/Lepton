@@ -98,7 +98,9 @@ as a GRUB ISO.
   code does not call libm. Hosted programs use the host C library; the kernel
   links only libgcc for 64-bit integer helpers.
 - **Interactive OS:** VGA text console, PS/2 and serial keyboard, 100 Hz PIT,
-  interrupts, and a live REPL.
+  interrupts, and a live REPL with `reset`, `reboot`, and Ctrl+Alt+Del. Expected
+  inference/configuration errors return to the prompt; fatal panics print a
+  reboot hint.
 - **Verified target:** TinyStories-15M on a 2008 Lenovo IdeaPad S9 (Intel Atom),
   plus a reproducible QEMU/ISO path.
 
@@ -256,6 +258,7 @@ encode Once upon a time
 generate 0
 genprompt "Once upon a time" 0.001 1
 reset
+reboot
 filetest
 ```
 

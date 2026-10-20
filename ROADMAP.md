@@ -286,6 +286,8 @@ tensors, not the 15M model label.
 
 - [ ] Simple ring buffer for command history (Up/Down arrows in the REPL)
 - [x] `reset` command to clear the KV cache without rebooting
+- [x] Soft configuration/inference errors return to the prompt
+- [x] Fatal panic screen with Ctrl+Alt+Del reboot path
 - [ ] `mem` command showing heap usage and limits
 - [ ] `perf` command showing per-phase timings
 - [ ] Prompt/generation length guard tied to the configured context length
@@ -329,7 +331,7 @@ The original goal was 32-bit PCs *and* modern devices.
 - [ ] BPE merge path uses fixed 64-byte piece slots and a 128-entry piece
       table; long merges/words can overflow
 - [ ] No tokenizer byte fallback for out-of-vocabulary UTF-8
-- [ ] Keyboard driver only handles Shift, no Ctrl/Alt
+- [x] Ctrl/Alt tracking, Ctrl+Alt+Del reboot, and `reboot` command
 - [ ] No keyboard LED control (caps lock)
 - [ ] Ring buffer drops input silently on overflow (128 chars max)
 - [ ] `generate`/`genprompt` are fixed at 30 tokens
