@@ -254,8 +254,10 @@ Enums are C enums and support equality and ordering within the same enum type.
 - `print`, `println`, and `panic` accept a string or stringifiable value.
 - Math: `sqrt`, `rsqrt`, `exp`, `tanh`, `erf`, `cos`, `sin` on scalars and
   `v4f32`.
-- Vector helpers: `sum`, `vmax`, `vmin`, `vmax2`, `vmin2`, `vcmplt`, `vcmpgt`,
-  `vselect`.
+- Vector helpers: `sum`, `vmax`, `vmin`, `vmax2`, `vmin2`, `vcmpeq`, `vcmpne`,
+  `vcmplt`, `vcmple`, `vcmpgt`, `vcmpge`, `vselect`. Comparisons produce
+  all-ones/all-zeros lane masks; pass them to `vselect`. All five vector types
+  are supported; SSE2 is used where it has a direct operation.
 
 ## Conversion policy
 
@@ -323,6 +325,5 @@ operator.
   expressions such as `(p + 1)[0] = ...` are not accepted.
 - Struct and array comparison are rejected; strings compare by content.
 - Untyped array/vector literals still infer a common element type.
-- `vcmpeq`, `vcmple`, and `vcmpge` are missing; `vselect` has no SSE2 path.
 - No `free`, `switch`, generics, closures, or definite-assignment analysis.
 - Freestanding file I/O is declared but not defined.

@@ -288,7 +288,7 @@ LP_VEC_SPLAT(v16i8, lp_v16i8, int8_t,  16)
 
    No SSE2 instruction does a full select, so vselect stays on the
    scalar path even on x86_64. GCC vectorizes it well. */
-#define LP_VEC_BINOPS(NAME, TYPE, COUNT)                                      \
+#define LP_VEC_BINOPS(NAME, TYPE, ETYPE, UTYPE, COUNT)                        \
   static inline TYPE lp_##NAME##_vmax2(TYPE a, TYPE b) {                      \
     TYPE r; for (int i = 0; i < COUNT; i++)                                   \
       r.e[i] = a.e[i] > b.e[i] ? a.e[i] : b.e[i];                             \
@@ -299,33 +299,69 @@ LP_VEC_SPLAT(v16i8, lp_v16i8, int8_t,  16)
       r.e[i] = a.e[i] < b.e[i] ? a.e[i] : b.e[i];                             \
     return r;                                                                 \
   }                                                                           \
+  static inline TYPE lp_##NAME##_vcmpeq(TYPE a, TYPE b) {                     \
+    TYPE r; for (int i = 0; i < COUNT; i++) {                                 \
+      union { ETYPE v; UTYPE u; } m;                                          \
+      m.u = (a.e[i] == b.e[i]) ? (UTYPE)~(UTYPE)0 : (UTYPE)0;                 \
+      r.e[i] = m.v;                                                           \
+    }                                                                         \
+    return r;                                                                 \
+  }                                                                           \
+  static inline TYPE lp_##NAME##_vcmpne(TYPE a, TYPE b) {                     \
+    TYPE r; for (int i = 0; i < COUNT; i++) {                                 \
+      union { ETYPE v; UTYPE u; } m;                                          \
+      m.u = (a.e[i] != b.e[i]) ? (UTYPE)~(UTYPE)0 : (UTYPE)0;                 \
+      r.e[i] = m.v;                                                           \
+    }                                                                         \
+    return r;                                                                 \
+  }                                                                           \
   static inline TYPE lp_##NAME##_vcmplt(TYPE a, TYPE b) {                     \
     TYPE r; for (int i = 0; i < COUNT; i++) {                                 \
-      union { float f; uint32_t u; } m;                                       \
-      m.u = (a.e[i] < b.e[i]) ? 0xFFFFFFFFu : 0x00000000u;                    \
-      r.e[i] = m.f;                                                           \
+      union { ETYPE v; UTYPE u; } m;                                          \
+      m.u = (a.e[i] < b.e[i]) ? (UTYPE)~(UTYPE)0 : (UTYPE)0;                  \
+      r.e[i] = m.v;                                                           \
+    }                                                                         \
+    return r;                                                                 \
+  }                                                                           \
+  static inline TYPE lp_##NAME##_vcmple(TYPE a, TYPE b) {                     \
+    TYPE r; for (int i = 0; i < COUNT; i++) {                                 \
+      union { ETYPE v; UTYPE u; } m;                                          \
+      m.u = (a.e[i] <= b.e[i]) ? (UTYPE)~(UTYPE)0 : (UTYPE)0;                 \
+      r.e[i] = m.v;                                                           \
     }                                                                         \
     return r;                                                                 \
   }                                                                           \
   static inline TYPE lp_##NAME##_vcmpgt(TYPE a, TYPE b) {                     \
     TYPE r; for (int i = 0; i < COUNT; i++) {                                 \
-      union { float f; uint32_t u; } m;                                       \
-      m.u = (a.e[i] > b.e[i]) ? 0xFFFFFFFFu : 0x00000000u;                    \
-      r.e[i] = m.f;                                                           \
+      union { ETYPE v; UTYPE u; } m;                                          \
+      m.u = (a.e[i] > b.e[i]) ? (UTYPE)~(UTYPE)0 : (UTYPE)0;                  \
+      r.e[i] = m.v;                                                           \
+    }                                                                         \
+    return r;                                                                 \
+  }                                                                           \
+  static inline TYPE lp_##NAME##_vcmpge(TYPE a, TYPE b) {                     \
+    TYPE r; for (int i = 0; i < COUNT; i++) {                                 \
+      union { ETYPE v; UTYPE u; } m;                                          \
+      m.u = (a.e[i] >= b.e[i]) ? (UTYPE)~(UTYPE)0 : (UTYPE)0;                 \
+      r.e[i] = m.v;                                                           \
     }                                                                         \
     return r;                                                                 \
   }                                                                           \
   static inline TYPE lp_##NAME##_vselect(TYPE mask, TYPE a, TYPE b) {         \
     TYPE r; for (int i = 0; i < COUNT; i++) {                                 \
-      union { float f; uint32_t u; } m, x, y, z;                              \
-      m.f = mask.e[i]; x.f = a.e[i]; y.f = b.e[i];                            \
+      union { ETYPE v; UTYPE u; } m, x, y, z;                                 \
+      m.v = mask.e[i]; x.v = a.e[i]; y.v = b.e[i];                            \
       z.u = (x.u & m.u) | (y.u & ~m.u);                                       \
-      r.e[i] = z.f;                                                           \
+      r.e[i] = z.v;                                                           \
     }                                                                         \
     return r;                                                                 \
   }
 
-LP_VEC_BINOPS(v4f32, lp_v4f32, 4)
+LP_VEC_BINOPS(v2f64, lp_v2f64, double,  uint64_t, 2)
+LP_VEC_BINOPS(v4f32, lp_v4f32, float,   uint32_t, 4)
+LP_VEC_BINOPS(v4i32, lp_v4i32, int32_t, uint32_t, 4)
+LP_VEC_BINOPS(v8i16, lp_v8i16, int16_t, uint16_t, 8)
+LP_VEC_BINOPS(v16i8, lp_v16i8, int8_t,  uint8_t, 16)
 #undef LP_VEC_BINOPS
 '''
 
@@ -820,6 +856,7 @@ def make_preamble(target):
         target.include_headers           e.g. <emmintrin.h> for x86_64
         target.vector_typedefs           struct/union definitions
         PREAMBLE_VEC_OPS                 elementwise ops, reductions, splats
+        target.extra_decls               target-specific vector helpers
 
     The emitter must emit RUNTIME or FREESTANDING_DECLS next, then
     RUNTIME_MATH. RUNTIME_MATH depends on lp_v4f32 being defined, which
@@ -832,4 +869,5 @@ def make_preamble(target):
     return (PREAMBLE_HEAD
             + PREAMBLE_READ_HELPERS
             + headers + '\n' + typedefs + '\n'
-            + PREAMBLE_VEC_OPS)
+            + PREAMBLE_VEC_OPS
+            + target.extra_decls)

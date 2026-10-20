@@ -71,8 +71,12 @@ VEC_REDUCTIONS = {'sum': 'sum', 'vmax': 'max', 'vmin': 'min'}
 VEC_BIN_OPS = {
     'vmax2':   ('vmax2',   2),
     'vmin2':   ('vmin2',   2),
+    'vcmpeq':  ('vcmpeq',  2),
+    'vcmpne':  ('vcmpne',  2),
     'vcmplt':  ('vcmplt',  2),
+    'vcmple':  ('vcmple',  2),
     'vcmpgt':  ('vcmpgt',  2),
+    'vcmpge':  ('vcmpge',  2),
     'vselect': ('vselect', 3),
 }
 

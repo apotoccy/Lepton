@@ -18,7 +18,8 @@ from __future__ import annotations
 
 class Target:
     def __init__(self, name, include_headers, vector_typedefs,
-                 intrinsics, splats, vec_binops):
+                 intrinsics, splats, vec_binops, vec_select=None,
+                 extra_decls=""):
         self.name = name
         self.include_headers = include_headers
         self.vector_typedefs = vector_typedefs
@@ -28,6 +29,8 @@ class Target:
         # SSE2 mapping is one instruction appear here; everything else
         # falls back to the scalar helper lp_<vec>_<op>.
         self.vec_binops = vec_binops
+        self.vec_select = vec_select or {}
+        self.extra_decls = extra_decls
 
 
 SCALAR_VEC_TYPEDEFS = {
@@ -78,17 +81,86 @@ X86_64_SPLATS = {
 }
 
 X86_64_VEC_BINOPS = {
+    ('vmax2',  'v2f64'): '_mm_max_pd',
+    ('vmin2',  'v2f64'): '_mm_min_pd',
+    ('vcmpeq', 'v2f64'): '_mm_cmpeq_pd',
+    ('vcmpne', 'v2f64'): '_mm_cmpneq_pd',
+    ('vcmplt', 'v2f64'): '_mm_cmplt_pd',
+    ('vcmple', 'v2f64'): '_mm_cmple_pd',
+    ('vcmpgt', 'v2f64'): '_mm_cmpgt_pd',
+    ('vcmpge', 'v2f64'): '_mm_cmpge_pd',
+
     ('vmax2',  'v4f32'): '_mm_max_ps',
     ('vmin2',  'v4f32'): '_mm_min_ps',
+    ('vcmpeq', 'v4f32'): '_mm_cmpeq_ps',
+    ('vcmpne', 'v4f32'): '_mm_cmpneq_ps',
     ('vcmplt', 'v4f32'): '_mm_cmplt_ps',
+    ('vcmple', 'v4f32'): '_mm_cmple_ps',
     ('vcmpgt', 'v4f32'): '_mm_cmpgt_ps',
+    ('vcmpge', 'v4f32'): '_mm_cmpge_ps',
+
+    # SSE2 has direct equality/greater-than for signed integers.
+    ('vcmpeq', 'v4i32'): '_mm_cmpeq_epi32',
+    ('vcmpgt', 'v4i32'): '_mm_cmpgt_epi32',
+    ('vcmpeq', 'v8i16'): '_mm_cmpeq_epi16',
+    ('vcmpgt', 'v8i16'): '_mm_cmpgt_epi16',
+    ('vcmpeq', 'v16i8'): '_mm_cmpeq_epi8',
+    ('vcmpgt', 'v16i8'): '_mm_cmpgt_epi8',
 }
+
+X86_64_VEC_SELECT = {
+    'v2f64': 'lp_v2f64_vselect_sse2',
+    'v4f32': 'lp_v4f32_vselect_sse2',
+    'v4i32': 'lp_v4i32_vselect_sse2',
+    'v8i16': 'lp_v8i16_vselect_sse2',
+    'v16i8': 'lp_v16i8_vselect_sse2',
+}
+
+X86_64_EXTRA_DECLS = r"""
+/* SSE2 lane select. The comparison helpers produce all-ones/all-zeros
+   masks, so a bitwise blend is exact for both floating and integer
+   vectors. */
+static inline lp_v2f64 lp_v2f64_vselect_sse2(lp_v2f64 m, lp_v2f64 a,
+                                              lp_v2f64 b) {
+    lp_v2f64 r;
+    r.v = _mm_or_pd(_mm_and_pd(m.v, a.v), _mm_andnot_pd(m.v, b.v));
+    return r;
+}
+static inline lp_v4f32 lp_v4f32_vselect_sse2(lp_v4f32 m, lp_v4f32 a,
+                                              lp_v4f32 b) {
+    lp_v4f32 r;
+    r.v = _mm_or_ps(_mm_and_ps(m.v, a.v), _mm_andnot_ps(m.v, b.v));
+    return r;
+}
+static inline lp_v4i32 lp_v4i32_vselect_sse2(lp_v4i32 m, lp_v4i32 a,
+                                              lp_v4i32 b) {
+    lp_v4i32 r;
+    r.v = _mm_or_si128(_mm_and_si128(m.v, a.v),
+                       _mm_andnot_si128(m.v, b.v));
+    return r;
+}
+static inline lp_v8i16 lp_v8i16_vselect_sse2(lp_v8i16 m, lp_v8i16 a,
+                                              lp_v8i16 b) {
+    lp_v8i16 r;
+    r.v = _mm_or_si128(_mm_and_si128(m.v, a.v),
+                       _mm_andnot_si128(m.v, b.v));
+    return r;
+}
+static inline lp_v16i8 lp_v16i8_vselect_sse2(lp_v16i8 m, lp_v16i8 a,
+                                              lp_v16i8 b) {
+    lp_v16i8 r;
+    r.v = _mm_or_si128(_mm_and_si128(m.v, a.v),
+                       _mm_andnot_si128(m.v, b.v));
+    return r;
+}
+"""
 
 TARGETS = {
     'scalar': Target('scalar', [], SCALAR_VEC_TYPEDEFS, {}, {}, {}),
     'x86_64': Target('x86_64', ['#include <emmintrin.h>'],
                      X86_64_VEC_TYPEDEFS, X86_64_INTRINSICS,
-                     X86_64_SPLATS, X86_64_VEC_BINOPS),
+                     X86_64_SPLATS, X86_64_VEC_BINOPS,
+                     X86_64_VEC_SELECT, X86_64_EXTRA_DECLS),
 }
 
 

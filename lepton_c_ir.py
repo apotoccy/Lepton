@@ -589,9 +589,16 @@ class CEmitter:
             vec_name = vt[1]
             args = [self.emit_value(a) for a in instr.args]
             if op == 'vselect':
-                intrinsic = None
-            else:
-                intrinsic = self.target.vec_binops.get((op, vec_name))
+                helper = self.target.vec_select.get(vec_name)
+                call_args = ", ".join(args)
+                if helper:
+                    self.emit(f"_t{instr.dst.id} = "
+                              f"{helper}({call_args});")
+                else:
+                    self.emit(f"_t{instr.dst.id} = "
+                              f"lp_{vec_name}_vselect({call_args});")
+                return
+            intrinsic = self.target.vec_binops.get((op, vec_name))
             if intrinsic:
                 self.emit(f"_t{instr.dst.id} = "
                           f"(({self.ctype(vt)})"

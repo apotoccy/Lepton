@@ -4,7 +4,7 @@ Compiler and OS for edge AI inference, from 32-bit PCs to modern devices.
 
 ## Current status (October 2026)
 
-- **Compiler:** single IR pipeline (AST → IR → verify → C11); 108/108 compiler
+- **Compiler:** single IR pipeline (AST → IR → verify → C11); 110/110 compiler
   tests pass on scalar and SSE2, plus 13 IR-verifier and 12 conversion-policy
   unit tests.
 - **OS:** 32-bit Multiboot kernel, GRUB ISO, QEMU boot, and an interactive REPL.
@@ -40,7 +40,7 @@ compiler or standard-library code.
 
 ## 🏆 Major Milestones Achieved
 
-- **Compiler:** single IR pipeline, 108/108 tests passing on scalar and SSE2
+- **Compiler:** single IR pipeline, 110/110 tests passing on scalar and SSE2
   plus 13 IR-verifier and 12 conversion-policy tests, emitting portable C11.
 - **Bare-Metal AI:** a 15M-parameter TinyStories model on a 2008 Lenovo IdeaPad
   S9 (Intel Atom), with no OS, libc, or Python; reproducible in QEMU and as a
@@ -75,6 +75,8 @@ compiler or standard-library code.
 - [x] Integer-only `for` loop bounds
 - [x] Mutable lvalues: `let` immutability, field/index/nested assignment, and
       compound assignment for identifiers, indices, fields, and vector lanes
+- [x] Vector min/max/comparison/select for all vector types, with SSE2
+      comparison/select paths and scalar fallbacks
 - [x] Language reference (`docs/LANGUAGE.md`)
 - [x] `pyflakes` step in CI and `pyflakes`-clean compiler modules
 - [ ] Remove the remaining commented AST-emitter code and update docstrings
@@ -293,10 +295,6 @@ The original goal was 32-bit PCs *and* modern devices.
 - [ ] `raw` blocks parse but are not lowered
 - [ ] Lvalue bases are limited to variables, fields, and indices; arbitrary
       expressions such as `(p + 1)[0] = ...` are not assignment targets
-- [ ] `vcmpeq`, `vcmple`, `vcmpge` are missing; `vselect` has no SSE2 intrinsic
-      path
-- [ ] Vector min/max/comparison helpers are only emitted for `v4f32`, even
-      though the checker accepts other vector types
 - [ ] Kernel linear layers support Q4_0/Q8_0 weights plus F32 norms;
       Q4_K/Q5_K/Q6_K and general F32 linear weights are missing
 - [ ] `parse_header` leaks a 24-byte buffer (fine for one call, bad in a loop)

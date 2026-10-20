@@ -742,7 +742,8 @@ class Verifier:
             self.err(f"vector operation result has type '{ts(instr.type)}'",
                      instr.pos)
         expected = 3 if instr.op == 'vselect' else 2
-        if instr.op not in ('vmax2', 'vmin2', 'vcmplt', 'vcmpgt',
+        if instr.op not in ('vmax2', 'vmin2', 'vcmpeq', 'vcmpne',
+                            'vcmplt', 'vcmple', 'vcmpgt', 'vcmpge',
                             'vselect'):
             self.err(f"unknown vector operation '{instr.op}'", instr.pos)
         if len(instr.args) != expected:
