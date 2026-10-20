@@ -343,9 +343,9 @@ These are the boundaries of the current implementation, not a wish list; see
 - **Freestanding file I/O.** `lp_file_size`, `lp_read_file_at`, and
   `lp_write_file` are defined in the kernel and return `-1`; there is no
   filesystem driver. Hosted builds use real file I/O.
-- **Tokenizer edge cases.** The BPE merges path exists but is untested on this
-  model (TinyStories has no merges), its fixed piece buffers need bounds work,
-  and byte-fallback handling is missing.
+- **Tokenizer edge cases.** The BPE merge path remains untested on this model
+  (TinyStories has no merges); piece buffers and vocab/count checks are now
+  bounded, and unknown bytes map to GGUF `<0xNN>` tokens when present.
 - **One backend.** Only scalar and x86-64 SSE2 are implemented. There is no
   AVX2, NEON/ARM, LLVM IR, or WASM backend yet.
 

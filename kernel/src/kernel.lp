@@ -62,13 +62,15 @@ fn parse_int_end(text: str, start: i64) -> i64 {
     return i;
 }
 
-fn build_tok_offsets(model: ptr[u8], tok_table: ptr[u32]) -> i64 {
+fn build_tok_offsets(model: ptr[u8], tok_table: ptr[u32],
+                     max_count: i64) -> i64 {
     let kc = read_u64(model, 16);
     let vo = find_kv(model, 24, kc, "tokenizer.ggml.tokens");
     if (vo < 0) { return -1; }
     let elem_type = read_u32(model, vo);
     if (elem_type != 8 as u32) { return -2; }
     let count = read_u64(model, vo + 4);
+    if (count as i64 > max_count) { return -3; }
     var off = vo + 12;
     var i: i64 = 0;
     while (i < (count as i64)) {
@@ -80,7 +82,11 @@ fn build_tok_offsets(model: ptr[u8], tok_table: ptr[u32]) -> i64 {
     return count as i64;
 }
 
-fn decode_tok(model: ptr[u8], tok_table: ptr[u32], tok_id: u32) -> str {
+fn decode_tok(model: ptr[u8], tok_table: ptr[u32], tok_count: i64,
+              tok_id: u32) -> str {
+    if (tok_id as i64 >= tok_count) {
+        return "";
+    }
     let off = tok_table[tok_id as i64] as i64;
     let len = read_u64(model, off) as i64;
     return read_str(model, off + 8, len);
@@ -545,6 +551,7 @@ fn build_merge_offsets(model: ptr[u8], merge_table: ptr[u32]) -> i64 {
     let et = read_u32(model, vo);
     if (et != 8 as u32) { return -2; }
     let count = read_u64(model, vo + 4);
+    if (count as i64 > 65536) { return -3; }
     var off = vo + 12;
     var i: i64 = 0;
     while (i < (count as i64)) {
@@ -575,6 +582,37 @@ fn clear_kv_cache(kv_k: ptr[f32], kv_v: ptr[f32],
         kv_k[i] = 0.0f;
         kv_v[i] = 0.0f;
     }
+}
+
+fn byte_token_id(model: ptr[u8], tok_table: ptr[u32],
+                  tok_count: i64, b: u8) -> i64 {
+    var name: [u8; 7] = {60, 48, 120, 0, 0, 62, 0};
+    var hi = (b >> 4) as i64;
+    var lo = (b & 15) as i64;
+    if (hi < 10) { name[3] = (48 + hi) as u8; }
+    else { name[3] = (55 + hi) as u8; }
+    if (lo < 10) { name[4] = (48 + lo) as u8; }
+    else { name[4] = (55 + lo) as u8; }
+
+    var tok: i64 = 0;
+    while (tok < tok_count) {
+        let toff = tok_table[tok] as i64;
+        let tlen = read_u64(model, toff) as i64;
+        if (tlen == 6) {
+            var k: i64 = 0;
+            var match: bool = true;
+            while (k < 6) {
+                if (read_u8(model, toff + 8 + k) != name[k]) {
+                    match = false;
+                    break;
+                }
+                k = k + 1;
+            }
+            if (match) { return tok; }
+        }
+        tok = tok + 1;
+    }
+    return -1;
 }
 
 fn bpe_encode_word(model: ptr[u8],
@@ -628,7 +666,14 @@ fn bpe_encode_word(model: ptr[u8],
             }
 
             if (best_id < 0) {
-                out_ids[n] = 0 as u32;
+                let byte_id = byte_token_id(model, tok_table,
+                                            tok_count,
+                                            word_buf[pos]);
+                if (byte_id >= 0) {
+                    out_ids[n] = byte_id as u32;
+                } else {
+                    out_ids[n] = 0 as u32;
+                }
                 n = n + 1;
                 pos = pos + 1;
             } else {
@@ -641,10 +686,11 @@ fn bpe_encode_word(model: ptr[u8],
     }
 
     /* Merge-based BPE path. Only reached if a merges list is loaded. */
+    if (word_len > 256) { return 0; }
     var m_n: i64 = 0;
     var m_i: i64 = 0;
     while (m_i < word_len) {
-        pieces_buf[m_i * 64] = word_buf[m_i];
+        pieces_buf[m_i * 256] = word_buf[m_i];
         pieces_len[m_i] = 1 as u32;
         m_n = m_n + 1;
         m_i = m_i + 1;
@@ -680,8 +726,8 @@ fn bpe_encode_word(model: ptr[u8],
             while (p < m_n - 1) {
                 let p1_len = pieces_len[p] as i64;
                 let p2_len = pieces_len[p+1] as i64;
-                if (piece_eq(model, x_off, x_len, p * 64, p1_len)
-                        && piece_eq(model, y_off, y_len, (p+1) * 64, p2_len)) {
+                if (piece_eq(model, x_off, x_len, p * 256, p1_len)
+                        && piece_eq(model, y_off, y_len, (p+1) * 256, p2_len)) {
                     found_p = p;
                     break;
                 }
@@ -689,10 +735,11 @@ fn bpe_encode_word(model: ptr[u8],
             }
             if (found_p < 0) { m = m + 1; continue; }
 
-            let dst_base = found_p * 64;
-            let src_base = (found_p + 1) * 64;
+            let dst_base = found_p * 256;
+            let src_base = (found_p + 1) * 256;
             let dst_off = pieces_len[found_p] as i64;
             let src_len = pieces_len[found_p + 1] as i64;
+            if (dst_off + src_len > 256) { m = m + 1; continue; }
             var q: i64 = 0;
             while (q < src_len) {
                 pieces_buf[dst_base + dst_off + q] = pieces_buf[src_base + q];
@@ -703,8 +750,8 @@ fn bpe_encode_word(model: ptr[u8],
             var r: i64 = found_p + 1;
             while (r < m_n - 1) {
                 var q2: i64 = 0;
-                while (q2 < 64) {
-                    pieces_buf[r * 64 + q2] = pieces_buf[(r+1) * 64 + q2];
+                while (q2 < 256) {
+                    pieces_buf[r * 256 + q2] = pieces_buf[(r+1) * 256 + q2];
                     q2 = q2 + 1;
                 }
                 pieces_len[r] = pieces_len[r + 1];
@@ -726,7 +773,7 @@ fn bpe_encode_word(model: ptr[u8],
             let tlen = read_u64(model, toff) as i64;
             if (tlen == piece_len) {
                 let tstr = toff + 8;
-                if (piece_eq(model, tstr, tlen, t * 64, piece_len)) {
+                if (piece_eq(model, tstr, tlen, t * 256, piece_len)) {
                     id = tok;
                     break;
                 }
@@ -747,10 +794,10 @@ fn encode_prompt(model: ptr[u8],
                  merge_table: ptr[u32], merge_count: i64,
                  text_buf: ptr[u8], text_start: i64, text_end: i64,
                  out_ids: ptr[u32]) -> i64 {
-    let word_buf = alloc([u8; 260]) as ptr[u8];
-    let pieces_buf = alloc([u8; 8192]) as ptr[u8];
-    let pieces_len = alloc([u32; 128]) as ptr[u32];
-    let temp_ids = alloc([u32; 128]) as ptr[u32];
+    let word_buf = alloc([u8; 512]) as ptr[u8];
+    let pieces_buf = alloc([u8; 65536]) as ptr[u8];
+    let pieces_len = alloc([u32; 256]) as ptr[u32];
+    let temp_ids = alloc([u32; 256]) as ptr[u32];
 
     var total: i64 = 0;
     var word_len: i64 = 0;
@@ -761,7 +808,7 @@ fn encode_prompt(model: ptr[u8],
         if (i == text_end || c == 32 || c == 10 || c == 13) {
             if (word_len > 0) {
                 /* Prepend ▁ = E2 96 81 */
-                let full_buf = alloc([u8; 264]) as ptr[u8];
+                let full_buf = alloc([u8; 516]) as ptr[u8];
                 full_buf[0] = 0xE2 as u8;
                 full_buf[1] = 0x96 as u8;
                 full_buf[2] = 0x81 as u8;
@@ -792,13 +839,15 @@ fn encode_prompt(model: ptr[u8],
     return total;
 }
 
-fn parse_quoted(text: str, start: i64, out_buf: ptr[u8]) -> i64 {
+fn parse_quoted(text: str, start: i64, out_buf: ptr[u8],
+                max_len: i64) -> i64 {
     var i = start;
     while (text[i] == ' ') { i = i + 1; }
     if (text[i] != '"') { return -1; }
     i = i + 1;
     var n: i64 = 0;
     while (text[i] != '"' && text[i] != '\0') {
+        if (n >= max_len - 1) { return -1; }
         out_buf[n] = text[i] as u8;
         n = n + 1;
         i = i + 1;
@@ -1144,7 +1193,7 @@ fn main() {
                         if (tok_count < 0) {
                             tok_count = build_tok_offsets(
                                 mb_module_start(0 as u32) as ptr[u8],
-                                tok_table);
+                                tok_table, active_cfg.vocab_size);
                             if (tok_count < 0) {
                                 println("  no tokenizer.ggml.tokens in model");
                             } else {
@@ -1156,7 +1205,7 @@ fn main() {
                                 println("  token id out of range");
                             } else {
                                 let model = mb_module_start(0 as u32) as ptr[u8];
-                                let tokstr = decode_tok(model, tok_table, tok_id as u32);
+                                let tokstr = decode_tok(model, tok_table, tok_count, tok_id as u32);
                                 print("  [{tok_id}] '");
                                 print_token(tokstr);
                                 println("'");
@@ -1174,7 +1223,7 @@ fn main() {
                         if (tok_count < 0) {
                             tok_count = build_tok_offsets(
                                 mb_module_start(0 as u32) as ptr[u8],
-                                tok_table);
+                                tok_table, active_cfg.vocab_size);
                             if (tok_count < 0) {
                                 println("  no tokenizer.ggml.tokens in model");
                             } else {
@@ -1186,7 +1235,7 @@ fn main() {
                             if (a < 0) { a = 0; }
                             let model = mb_module_start(0 as u32) as ptr[u8];
                             for n in a..(b + 1) {
-                                let tokstr = decode_tok(model, tok_table, n as u32);
+                                let tokstr = decode_tok(model, tok_table, tok_count, n as u32);
                                 print("  [{n}] '");
                                 print_token(tokstr);
                                 println("'");
@@ -1234,7 +1283,7 @@ fn main() {
                         if (tok_count < 0) {
                             tok_count = build_tok_offsets(
                                 mb_module_start(0 as u32) as ptr[u8],
-                                tok_table);
+                                tok_table, active_cfg.vocab_size);
                         }
                         let etok = parse_int_at(text, 5);
                         let em = mb_module_start(0 as u32) as ptr[u8];
@@ -1263,7 +1312,7 @@ fn main() {
                             let erow = scratch_bytes as ptr[f32];
                             dequant_q4_0_tensor((em + erow_off) as ptr[u8],
                                                 erow, eblocks);
-                            println("  token {etok}: '{decode_tok(em, tok_table, etok as u32)}'");
+                            println("  token {etok}: '{decode_tok(em, tok_table, tok_count, etok as u32)}'");
                             println("  d[0]={erow[0]} d[1]={erow[1]} d[2]={erow[2]} d[3]={erow[3]}");
                         }
                     }
@@ -1274,7 +1323,7 @@ fn main() {
                         if (tok_count < 0) {
                             tok_count = build_tok_offsets(
                                 mb_module_start(0 as u32) as ptr[u8],
-                                tok_table);
+                                tok_table, active_cfg.vocab_size);
                         }
                         let fwd_model = mb_module_start(0 as u32) as ptr[u8];
                         let fwd_cfg = model_config(fwd_model);
@@ -1291,7 +1340,7 @@ fn main() {
                             let fwd_best = lp_argmax(logits_buf,
                                                      fwd_cfg.vocab_size as i32);
                             println("  predicted token = {fwd_best}");
-                            let fwd_str = decode_tok(fwd_model, tok_table,
+                            let fwd_str = decode_tok(fwd_model, tok_table, tok_count,
                                                      fwd_best);
                             print("  '");
                             print_token(fwd_str);
@@ -1331,7 +1380,7 @@ fn main() {
                         if (tok_count < 0) {
                             tok_count = build_tok_offsets(
                                 mb_module_start(0 as u32) as ptr[u8],
-                                tok_table);
+                                tok_table, active_cfg.vocab_size);
                         }
                         let fp_pos = parse_int_at(text, 6);
                         let fp_end = parse_int_end(text, 6);
@@ -1351,7 +1400,7 @@ fn main() {
                             let fp_best = lp_argmax(logits_buf,
                                                      fp_cfg.vocab_size as i32);
                             println("  pos={fp_pos} token={fp_tok} -> {fp_best}");
-                            let fp_s = decode_tok(fp_m, tok_table, fp_best);
+                            let fp_s = decode_tok(fp_m, tok_table, tok_count, fp_best);
                             print("  '");
                             print_token(fp_s);
                             println("'");
@@ -1364,7 +1413,7 @@ fn main() {
                         if (tok_count < 0) {
                             tok_count = build_tok_offsets(
                                 mb_module_start(0 as u32) as ptr[u8],
-                                tok_table);
+                                tok_table, active_cfg.vocab_size);
                         }
                         var gen_temp: f32 = 1.0f;
                         var gen_k: i64 = 40;
@@ -1401,7 +1450,7 @@ fn main() {
                             }
                             cur = lp_sample(logits_buf, gen_cfg.vocab_size as i32,
                                             gen_temp, gen_k as i32);
-                            let gs = decode_tok(gen_m, tok_table, cur);
+                            let gs = decode_tok(gen_m, tok_table, tok_count, cur);
                             print_token(gs);
                         }
                         println("");
@@ -1413,7 +1462,7 @@ fn main() {
                         if (tok_count < 0) {
                             tok_count = build_tok_offsets(
                                 mb_module_start(0 as u32) as ptr[u8],
-                                tok_table);
+                                tok_table, active_cfg.vocab_size);
                         }
                         if (merge_count < 0) {
                             merge_count = build_merge_offsets(
@@ -1436,7 +1485,7 @@ fn main() {
                             var ti: i64 = 0;
                             while (ti < n_enc) {
                                 let tid = enc_ids[ti];
-                                let dec = decode_tok(em, tok_table, tid);
+                                let dec = decode_tok(em, tok_table, tok_count, tid);
                                 print("  [{ti}] {tid} = '");
                                 print_token(dec);
                                 println("'");
@@ -1451,7 +1500,7 @@ fn main() {
                         if (tok_count < 0) {
                             tok_count = build_tok_offsets(
                                 mb_module_start(0 as u32) as ptr[u8],
-                                tok_table);
+                                tok_table, active_cfg.vocab_size);
                         }
                         if (merge_count < 0) {
                             merge_count = build_merge_offsets(
@@ -1463,7 +1512,7 @@ fn main() {
                         }
                         {
                             let gp_buf = alloc([u8; 512]) as ptr[u8];
-                            let gp_end = parse_quoted(text, 9, gp_buf);
+                            let gp_end = parse_quoted(text, 9, gp_buf, 253);
                             if (gp_end < 0) {
                                 println("  usage: genprompt \"text\" [temp] [top_k]");
                             } else {
@@ -1530,7 +1579,7 @@ fn main() {
                                 print("  ");
                                 var gp_next: u32 = lp_sample(logits_buf, gp_cfg.vocab_size as i32,
                                                               gp_t as f32, gp_k as i32);
-                                let gp_s0 = decode_tok(gp_m, tok_table, gp_next);
+                                let gp_s0 = decode_tok(gp_m, tok_table, tok_count, gp_next);
                                 print_token(gp_s0);
 
                                 var gp_g: i64 = 1;
@@ -1546,7 +1595,7 @@ fn main() {
                                     }
                                     gp_next = lp_sample(logits_buf, gp_cfg.vocab_size as i32,
                                                         gp_t as f32, gp_k as i32);
-                                    let gp_sn = decode_tok(gp_m, tok_table, gp_next);
+                                    let gp_sn = decode_tok(gp_m, tok_table, tok_count, gp_next);
                                     print_token(gp_sn);
                                     gp_pos = gp_pos + 1;
                                     gp_g = gp_g + 1;

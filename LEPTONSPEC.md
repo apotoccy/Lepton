@@ -184,8 +184,9 @@ dequantized-weight cache is future work.
 
 ### 4.4 Tokenizer and sampling
 
-- BPE vocabulary from GGUF.
+- BPE vocabulary from GGUF, with bounded piece buffers and capacity checks.
 - Greedy longest-match fallback for models without merge lists.
+- Unknown bytes map to `<0xNN>` vocabulary entries when available.
 - Temperature scaling and Top-K filtering with an xorshift32 PRNG.
 
 The merge path exists but is untested on TinyStories, which has no merges.

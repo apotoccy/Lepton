@@ -172,14 +172,15 @@ Generation & Tokenizer:
       fixed 30 tokens; variable length is pending)
 - [x] Sampling: temperature, top-k, xorshift32 PRNG
 - [x] Tokenizer decode (BPE vocab offsets, U+2581 substitution)
-- [x] Tokenizer encode (BPE merges path plus greedy fallback); the merge path
-      is untested on this model because TinyStories has no merges, and its
-      fixed piece buffers need bounds work
+- [x] Tokenizer encode (BPE merges path plus greedy fallback) with bounded
+      vocab/piece buffers and `<0xNN>` byte fallback; the merge path is still
+      untested on TinyStories because it has no merges
 - [x] Prompt-based generation (`genprompt "..." T K`); note that `T <= 0` is
       currently coerced to `1.0`, so use a small positive temperature such as
       `0.001` for greedy output
-- [ ] Tokenizer byte-fallback handling for out-of-vocabulary UTF-8
-- [ ] Bounds-safe BPE piece buffers and a test with a model that has merges
+- [x] Tokenizer byte fallback to `<0xNN>` vocabulary entries
+- [x] Bounds-safe token table, decode IDs, merge table, and piece buffers
+- [ ] Test the BPE merge path with a model that has merges
 
 ## Phase 4 — Backends (Deferred)
 
@@ -258,8 +259,8 @@ tensors, not the 15M model label.
 - [x] Derive `head_dim`/vocabulary and validate the supported shape; reject
       unsupported shapes instead of running with wrong dimensions
 - [ ] Validate tensor dimensions and types at load
-- [ ] Remove the remaining tokenizer fixed-buffer limits (merge table, word
-      and piece buffers, output ID capacity)
+- [ ] Tokenizer buffers remain fixed-size but are capacity-checked for the
+      current line/prompt limits
 - [x] Add grouped-query attention (`n_head_kv`) and validate it against a
       two-position synthetic GQA reference
 - [ ] Add Q4_K/Q5_K/Q6_K dequantization or, preferably, quantized dot products
@@ -325,9 +326,7 @@ The original goal was 32-bit PCs *and* modern devices.
       Inference workspaces are config-sized within a 60 MB budget and a
       256-position context cap.
 - [ ] `free` remains a no-op in the bump allocator
-- [ ] BPE merge path uses fixed 64-byte piece slots and a 128-entry piece
-      table; long merges/words can overflow
-- [ ] No tokenizer byte fallback for out-of-vocabulary UTF-8
+- [ ] BPE merge path remains untested; piece slots are bounded to 256 bytes
 - [x] Ctrl/Alt tracking, Ctrl+Alt+Del reboot, and `reboot` command
 - [x] ACPI `poweroff` command with emulator fallbacks
 - [x] Architecture-aware GGUF config keys and tensor-shape fallbacks
