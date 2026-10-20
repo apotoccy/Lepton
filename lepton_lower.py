@@ -18,7 +18,8 @@ from lepton_ir import (
     IRModule, IRFunc, IRLocal, IRConst,
     IRBind, IRAssign, IRBinOp, IRUnOp, IRCall,
     IRConcat, IRToString, IRCast, IRMathOp, IRVecReduce, IRSplat,
-    IRVecBinOp, IRAggregateEq, IRArrayLit, IRArrayIndex, IRArraySet,
+    IRVecBinOp, IRAggregateEq, IRArrayCast, IRArrayLit, IRArrayIndex,
+    IRArraySet,
     IRRef, IRAlloc,
     IRStructInit, IRFieldGet, IRFieldSet,
     IRVecLit, IRVecIndex, IRVecSet,
@@ -69,6 +70,8 @@ VEC_REDUCTIONS = {'sum': 'sum', 'vmax': 'max', 'vmin': 'min'}
 # or one-arg-math pattern. Each entry maps a source name to (op, arity)
 # where op is the IRVecBinOp op and arity is how many positional args
 # the source form takes.
+ALLOC_BUILTINS = {'free', 'alloc_reset'}
+
 VEC_BIN_OPS = {
     'vmax2':   ('vmax2',   2),
     'vmin2':   ('vmin2',   2),
@@ -1111,12 +1114,27 @@ class Lowering:
         if src == dst:
             return v
 
-        # Match the AST path: no casts to or from structs, enums, or
-        # arrays. Those are the types where a raw C cast would be either
-        # meaningless or a silent footgun.
-        if src[0] in ('named', 'array'):
+        if is_array(src) or is_array(dst):
+            if not (is_array(src) and is_array(dst)):
+                self.err(f"cannot convert '{ts(src)}' to '{ts(dst)}'", e.pos)
+            if array_len(src) != array_len(dst):
+                self.err(f"cannot convert array of length {array_len(src)} "
+                         f"to length {array_len(dst)}", e.pos)
+            se = array_elem(src)
+            de = array_elem(dst)
+            if not ((is_num(se) and is_num(de))
+                    or (se[0] == 'ptr' and de[0] == 'ptr')):
+                self.err(f"cannot convert array element type '{ts(se)}' "
+                         f"to '{ts(de)}'", e.pos)
+            tmp = self.func.new_temp(dst)
+            self.block.add(IRArrayCast(tmp, v, dst, e.pos))
+            return tmp
+
+        # No casts to or from structs or enums: a raw C cast would be
+        # either meaningless or a silent footgun.
+        if src[0] == 'named':
             self.err(f"cannot convert '{ts(src)}' to '{ts(dst)}'", e.pos)
-        if dst[0] in ('named', 'array'):
+        if dst[0] == 'named':
             self.err(f"cannot convert '{ts(src)}' to '{ts(dst)}'", e.pos)
 
         tmp = self.func.new_temp(dst)
@@ -1478,6 +1496,27 @@ class Lowering:
         self.block.add(IRRef(dst, IRLocal(cname, t), ('ptr', t), e.pos))
         return dst
 
+    def lower_alloc_builtin(self, name, e):
+        if name == 'alloc_reset':
+            if e.args:
+                self.err("alloc_reset takes no arguments", e.pos)
+            self.block.add(IRCall(None, 'lp_alloc_reset', [],
+                                  ('prim', 'void'), e.pos))
+            return None
+
+        if len(e.args) != 1:
+            self.err("free takes exactly 1 argument", e.pos)
+        a = e.args[0]
+        if a.kind == 'namedarg':
+            self.err("free takes a positional argument", a.pos)
+        v = self.lower_expr(a)
+        if v is None:
+            self.err("free needs a value", a.pos)
+        if v.type[0] != 'ptr':
+            self.err(f"free needs a pointer, got '{ts(v.type)}'", a.pos)
+        self.block.add(IRCall(None, 'lp_free', [v], ('prim', 'void'), e.pos))
+        return None
+
     def lower_alloc(self, e):
         t = self.resolve_type(e.type, e.pos)
         if not is_array(t):
@@ -1494,6 +1533,8 @@ class Lowering:
 
         if name in BUILTIN_C_NAMES:
             return self.lower_builtin(name, e)
+        if name in ALLOC_BUILTINS:
+            return self.lower_alloc_builtin(name, e)
 
         if name in MATH_INTRINSICS:
             return self.lower_math(name, e) 

@@ -23,7 +23,7 @@ from __future__ import annotations
 from lepton_ir import (
     IRTemp, IRLocal, IRConst,
     IRBind, IRAssign, IRBinOp, IRUnOp, IRCall,
-    IRConcat, IRToString, IRCast, IRMathOp, IRVecReduce, IRSplat,
+    IRConcat, IRToString, IRCast, IRArrayCast, IRMathOp, IRVecReduce, IRSplat,
     IRVecBinOp, IRAggregateEq, IRArrayLit, IRArrayIndex, IRArraySet,
     IRRef, IRAlloc,
     IRStructInit, IRFieldGet, IRFieldSet,
@@ -122,6 +122,8 @@ RUNTIME_CALLS = {
     'lp_file_size': ([STR], I64),
     'lp_read_file_at': ([STR, I64, ANY_PTR, I64], I64),
     'lp_write_file': ([STR, ANY_PTR, I64], I64),
+    'lp_free':     ([ANY_PTR], VOID),
+    'lp_alloc_reset': ([], VOID),
     'lp_read_str': ([ANY_PTR, I64, I64], STR),
     'lp_str_eq':   ([STR, STR], BOOL),
     'lp_str_cmp':  ([STR, STR], I32),
@@ -417,6 +419,24 @@ class Verifier:
                 self.err("cast target has invalid type", instr.pos)
             self.check_dst(instr, instr.type)
             self.check_value(instr.value, "cast source")
+            return
+
+        if isinstance(instr, IRArrayCast):
+            if instr.type is None or instr.type == VOID:
+                self.err("array cast target has invalid type", instr.pos)
+            self.check_dst(instr, instr.type)
+            self.check_value(instr.value, "array cast source")
+            if not (is_array(instr.value.type) and is_array(instr.type)):
+                self.err(f"array cast from '{ts(instr.value.type)}' to "
+                         f"'{ts(instr.type)}'", instr.pos)
+            if array_len(instr.value.type) != array_len(instr.type):
+                self.err("array cast length mismatch", instr.pos)
+            se = array_elem(instr.value.type)
+            de = array_elem(instr.type)
+            if not ((is_num(se) and is_num(de))
+                    or (se[0] == 'ptr' and de[0] == 'ptr')):
+                self.err(f"array cast element from '{ts(se)}' to "
+                         f"'{ts(de)}'", instr.pos)
             return
 
         if isinstance(instr, IRMathOp):

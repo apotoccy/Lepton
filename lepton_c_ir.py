@@ -11,14 +11,14 @@ from lepton_ir import (
     IRTemp, IRLocal, IRConst,
     IRBind, IRAssign, IRBinOp, IRUnOp, IRCall,
     IRConcat, IRToString, IRCast, IRMathOp, IRVecReduce, IRSplat,
-    IRVecBinOp, IRAggregateEq,
+    IRVecBinOp, IRAggregateEq, IRArrayCast,
     IRArrayLit, IRArrayIndex, IRArraySet, IRRef, IRAlloc,
     IRStructInit, IRFieldGet, IRFieldSet,
     IRVecLit, IRVecIndex, IRVecSet,
     IRReturn, IRJump, IRCondJump,
 )
 from lepton_types import (CTYPE, PRIMS, is_int, is_vector,
-                          is_array, array_ctype_name)
+                          is_array, array_elem, array_len, array_ctype_name)
 from leptonc import CompileError
 
 from lepton_runtime import (make_preamble, RUNTIME, RUNTIME_MATH,
@@ -493,6 +493,24 @@ class CEmitter:
         return targets
     
 
+    def cast_expr(self, v, src, dst):
+        """C expression converting scalar `v` from `src` to `dst`."""
+        q_types = (('prim', 'q7'), ('prim', 'q15'), ('prim', 'q31'))
+        src_q = src in q_types
+        dst_q = dst in q_types
+
+        if dst_q and not src_q:
+            return f"lp_{dst[1]}_from_f32((float){v})"
+        if src_q and not dst_q:
+            return f"(({self.ctype(dst)})lp_{src[1]}_to_f32({v}))"
+        if src_q and dst_q and src != dst:
+            return f"lp_{dst[1]}_from_f32(lp_{src[1]}_to_f32({v}))"
+        if dst == ('prim', 'bf16') and src != ('prim', 'bf16'):
+            return f"lp_bf16_from_f32((float){v})"
+        if src == ('prim', 'bf16') and dst != ('prim', 'bf16'):
+            return f"(({self.ctype(dst)})lp_bf16_to_f32({v}))"
+        return f"(({self.ctype(dst)}){v})"
+
     def emit_instr(self, instr):
         if isinstance(instr, IRCall):
             args = ", ".join(self.emit_value(a) for a in instr.args)
@@ -781,34 +799,22 @@ class CEmitter:
                 
         if isinstance(instr, IRCast):
             v = self.emit_value(instr.value)
-            src = instr.value.type
-            dst = instr.type
-            q_types = (('prim', 'q7'), ('prim', 'q15'), ('prim', 'q31'))
-            src_q = src in q_types
-            dst_q = dst in q_types
+            expr = self.cast_expr(v, instr.value.type, instr.type)
+            self.emit(f"_t{instr.dst.id} = {expr};")
+            return
 
-            if dst_q and not src_q:
-                self.emit(f"_t{instr.dst.id} = "
-                          f"lp_{dst[1]}_from_f32((float){v});")
-                return
-            if src_q and not dst_q:
-                self.emit(f"_t{instr.dst.id} = "
-                          f"(({self.ctype(dst)})lp_{src[1]}_to_f32({v}));")
-                return
-            if src_q and dst_q and src != dst:
-                self.emit(f"_t{instr.dst.id} = "
-                          f"lp_{dst[1]}_from_f32(lp_{src[1]}_to_f32({v}));")
-                return
-            if dst == ('prim', 'bf16') and src != ('prim', 'bf16'):
-                self.emit(f"_t{instr.dst.id} = "
-                          f"lp_bf16_from_f32((float){v});")
-                return
-            if src == ('prim', 'bf16') and dst != ('prim', 'bf16'):
-                self.emit(f"_t{instr.dst.id} = "
-                          f"(({self.ctype(dst)})lp_bf16_to_f32({v}));")
-                return
-            self.emit(f"_t{instr.dst.id} = "
-                      f"(({self.ctype(dst)}){v});")
+        if isinstance(instr, IRArrayCast):
+            src = self.emit_value(instr.value)
+            se = array_elem(instr.value.type)
+            de = array_elem(instr.type)
+            n = array_len(instr.type)
+            iv = f"_i{instr.dst.id}"
+            self.emit(f"for (int {iv} = 0; {iv} < {n}; {iv}++) {{")
+            self.indent += 1
+            self.emit(f"_t{instr.dst.id}.e[{iv}] = "
+                      f"{self.cast_expr(f'({src}).e[{iv}]', se, de)};")
+            self.indent -= 1
+            self.emit("}")
             return
                    
         if isinstance(instr, IRJump):

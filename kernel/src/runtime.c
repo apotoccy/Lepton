@@ -64,6 +64,16 @@ char *lp_alloc(unsigned long n) {
     return p;
 }
 
+/* The bump allocator cannot reclaim one block. free() is a no-op here;
+   alloc_reset() reclaims the whole heap. */
+void lp_free(void *p) {
+    (void)p;
+}
+
+void lp_alloc_reset(void) {
+    heap_used = 0;
+}
+
 //char *lp_alloc(unsigned long n) {
 //    n = (n + 15UL) & ~15UL;
 //    if (heap_used + n > HEAP_SIZE) return (char *)0;

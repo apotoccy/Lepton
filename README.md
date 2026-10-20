@@ -11,7 +11,7 @@ as a GRUB ISO.
 
 ## Status (as of October 2026)
 
-- **Compiler:** 111/111 regression tests pass with both the scalar and x86-64
+- **Compiler:** 117/117 regression tests pass with both the scalar and x86-64
   SSE2 targets (`make test`, `make test-sse`), plus 13 IR-verifier and 12
   conversion-policy unit tests.
 - **Build:** 64-bit and 32-bit userland programs build; the freestanding 32-bit
@@ -68,6 +68,12 @@ as a GRUB ISO.
   Struct fields and array elements compare by value, strings by content,
   vectors lane-wise, and pointers by address. Floating-point fields use IEEE
   `==`, so NaNs compare unequal.
+- **Explicit array casts:** `as` converts arrays with the same length and
+  numeric or pointer element types element by element, including `f16`/`bf16`
+  and quantized conversions. There are no implicit array conversions.
+- **Allocator control:** `free(ptr)` releases a hosted allocation;
+  `alloc_reset()` reclaims the whole freestanding bump heap. In freestanding
+  builds `free` is a no-op.
 - **Self-contained runtime:** math (`sqrt`, `exp`, `tanh`, `erf`, `cos`, `sin`),
   sampling, GGUF parsing, and print/string helpers are hand-written. Generated
   code does not call libm. Hosted programs use the host C library; the kernel
@@ -169,9 +175,9 @@ make test
 make test-sse
 ```
 
-Expected results: `make test` reports `111 passed, 0 failed`,
+Expected results: `make test` reports `117 passed, 0 failed`,
 `IR verifier: 13 tests passed`, and `Conversion policy: 12 tests passed`;
-`make test-sse` reports `111 passed, 0 failed`.
+`make test-sse` reports `117 passed, 0 failed`.
 
 ### 2. Build and run a userland program
 
@@ -269,16 +275,18 @@ These are the boundaries of the current implementation, not a wish list; see
   conversions warn by default; `--strict-types` makes them errors. Explicit
   `as` casts never warn. Integer-to-float is allowed without warning (wide
   integers may lose precision), and byte/void pointer views are always
-  allowed. Untyped array/vector literals still infer a common type; two
-  differently typed array variables cannot be converted element-wise.
+  allowed. Untyped array/vector literals still infer a common type; array
+  conversions are explicit (`a as [f32; N]`), not implicit.
 - **Definite assignment.** All locals are zero-initialized; there is no
   flow-sensitive definite-assignment analysis, so reading an uninitialized
   `var` is legal and yields zero.
-- **Memory management.** The kernel uses a bump allocator with no `free` or
-  reset. Commands that allocate per item (`vocab`, `encode`, `tensors`, token
-  decoding) leak across REPL invocations, and not every `lp_alloc` result is
-  checked for null. The heap is a fixed 64 MB reservation after the loaded
-  module, not dynamically sized from the Multiboot memory map.
+- **Memory management.** The kernel uses a bump allocator. `free` is a no-op
+  in freestanding builds; `alloc_reset` reclaims the whole heap but invalidates
+  every live allocation. Commands that allocate per item (`vocab`, `encode`,
+  `tensors`, token decoding) still leak across REPL invocations until they call
+  `alloc_reset` at a safe boundary, and not every `lp_alloc` result is checked
+  for null. The heap is a fixed 64 MB reservation after the loaded module, not
+  dynamically sized from the Multiboot memory map.
 - **Quantization coverage.** Q4_K/Q5_K/Q6_K and grouped-query attention (GQA)
   are not implemented. The kernel's linear layers handle Q4_0/Q8_0 weights plus
   F32 norm tensors; other tensor types are not supported.

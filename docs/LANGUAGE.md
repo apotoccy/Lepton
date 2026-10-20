@@ -221,7 +221,20 @@ fn by_ref(a: ptr[[i32; 4]]) -> void { a[0] = 99; }  // caller changed
 ```
 
 Nested arrays, arrays of structs, and arrays as struct fields are supported.
-Differently typed array variables are not converted element-wise.
+
+Arrays convert element-wise only through an explicit `as` cast. The source and
+destination must have the same length, and their element types must both be
+numeric or both be pointers:
+
+```lepton
+let a: [i32; 4] = {1, 2, 3, 4};
+let b = a as [f32; 4];       // element-wise i32 -> f32
+let c = b as [q15; 4];       // element-wise float -> q15
+```
+
+`f16`/`bf16` and quantized conversions use the normal scalar conversion rules.
+There are no implicit array conversions, and arrays of structs, strings,
+vectors, or nested arrays are not cast element-wise.
 
 ### Pointers
 
@@ -233,7 +246,20 @@ let d = q - p;               // i64 element difference
 let r = &some_local;         // address of a named local
 ```
 
-`alloc` uses a bump allocator; there is no `free`.
+`alloc` uses a bump allocator in freestanding builds. Two builtins manage
+lifetime:
+
+```lepton
+let p = alloc([i32; 4]);
+free(p);            // hosted: releases p; freestanding: no-op
+alloc_reset();      // freestanding: reclaims the whole bump heap
+```
+
+`alloc_reset()` invalidates every outstanding allocation, so call it only at a
+safe boundary. In hosted builds the allocator is `malloc`-based: `free` works
+per allocation and `alloc_reset` is a no-op. In freestanding builds the bump
+allocator cannot reclaim one block, so `free` is a no-op and `alloc_reset`
+reclaims everything.
 
 ### Structs
 
@@ -284,7 +310,9 @@ Enums are C enums and support equality and ordering within the same enum type.
 ## Conversion policy
 
 Explicit `as` casts are always allowed for numeric and pointer conversions and
-never produce conversion warnings.
+never produce conversion warnings. Array-to-array `as` casts are also explicit;
+they require equal lengths and numeric-or-pointer element types, and convert
+each element with the scalar rules.
 
 Implicit conversions at annotated boundaries follow this policy:
 
@@ -347,5 +375,6 @@ operator.
   expressions such as `(p + 1)[0] = ...` are not accepted.
 - Struct and array ordering is rejected; only `==`/`!=` are supported.
 - Untyped array/vector literals still infer a common element type.
-- No `free`, `switch`, generics, closures, or definite-assignment analysis.
+- No `switch`, generics, closures, or definite-assignment analysis.
+- Freestanding `free` is a no-op; `alloc_reset` reclaims the whole bump heap.
 - Freestanding file I/O is declared but not defined.

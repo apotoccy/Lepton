@@ -254,6 +254,23 @@ class IRCast(IRInstr):
         if self.value is old:
             self.value = new
          
+class IRArrayCast(IRInstr):
+    """dst = element-wise cast of an array value to another array type."""
+
+    def __init__(self, dst, value, type, pos=None):
+        super().__init__(pos)
+        self.dst = dst
+        self.value = value
+        self.type = type
+
+    def operands(self):
+        return [self.value]
+
+    def replace_operand(self, old, new):
+        if self.value is old:
+            self.value = new
+
+
 class IRMathOp(IRInstr):
     """dst = op(arg). op is one of: sqrt, rsqrt, exp, tanh, erf.
 
@@ -713,6 +730,9 @@ def render_instr(instr):
         return (f"%{instr.dst.id} = str({render_value(instr.value)})")
     if isinstance(instr, IRCast):
         return (f"%{instr.dst.id} = cast<{_fmt_type(instr.type)}>("
+                f"{render_value(instr.value)})")
+    if isinstance(instr, IRArrayCast):
+        return (f"%{instr.dst.id} = array_cast<{_fmt_type(instr.type)}>("
                 f"{render_value(instr.value)})")
     if isinstance(instr, IRMathOp):
         args = ", ".join(render_value(a) for a in instr.args)
