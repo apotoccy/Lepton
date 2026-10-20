@@ -87,6 +87,11 @@ as a GRUB ISO.
 
 - [Language reference](docs/LANGUAGE.md) — syntax, types, aggregates,
   conversions, control flow, and current gaps.
+- [Language guide](DOCS.md) — practical overview of the implemented language.
+- [Lepton OS guide](DOC-LEPTONOS.md) — architecture, drivers, REPL, and build
+  and deployment instructions.
+- [Technical specification](LEPTONSPEC.md) — compiler, runtime, OS, and
+  inference design.
 - [Roadmap](ROADMAP.md) — status, history, and next work.
 - [Model notes](models/README.md) — expected TinyStories file and checksum.
 
@@ -115,6 +120,9 @@ Lepton/
 ├── Makefile                # Userland, kernel, ISO, flash, and test targets
 ├── README.md
 ├── ROADMAP.md              # Development history, status, and future work
+├── DOC-LEPTONOS.md          # Lepton OS guide
+├── DOCS.md                  # Practical language guide
+├── LEPTONSPEC.md            # Technical specification
 │
 ├── src/hello.lp            # Sample userland program
 │

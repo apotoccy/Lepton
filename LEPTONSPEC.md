@@ -1,0 +1,247 @@
+# Lepton OS & Lepton Language Technical Specification
+
+## 1. Executive summary
+
+Lepton is a minimalist, AI-native programming language and bare-metal operating
+system for edge inference. Its goal is to run quantized language models directly
+on raw hardware - including legacy 32-bit PCs - without Linux, glibc, a Python
+VM, PyTorch, CUDA, or another ML framework.
+
+The system is deterministic, statically typed, and built around a compiler that
+emits portable C11. The same compiler produces hosted test programs and
+freestanding 32-bit kernel code.
+
+Current status:
+
+- **117/117** compiler tests on scalar and x86-64 SSE2.
+- 13 IR-verifier tests and 12 conversion-policy tests.
+- TinyStories-15M boots and runs in QEMU and on a 2008-era Lenovo IdeaPad S9.
+- `fwdpos 0 1` predicts token **9038** (`Once`), matching the Python reference.
+
+## 2. System architecture
+
+The repository contains three primary subsystems:
+
+1. **The compiler** (`leptonc.py` and `lepton_*.py`) translates Lepton source to
+   C11.
+2. **The standard library** (`std/`) implements GGUF parsing, tensor helpers,
+   dequantization, matmul, normalization, and activations in Lepton.
+3. **Lepton OS** (`kernel/`) is a 32-bit x86 Multiboot 1 kernel with a REPL,
+   drivers, and the inference loop.
+
+### 2.1 Compiler pipeline
+
+The compiler is written in Python and uses a multi-pass pipeline:
+
+1. **Lexer and parser.** A hand-written lexer and recursive-descent parser
+   produce an AST with source spans.
+2. **Type resolution and lowering.** The AST is lowered to a flat, typed
+   intermediate representation (`lepton_ir.py`). Locals and temporaries are
+   function-scoped and hoisted into C function scope.
+3. **IR verification.** `lepton_verify.py` checks labels, jumps, terminators,
+   local/temp types, operand and destination types, call signatures, aggregate
+   shapes, and return paths before C emission. `--verify-ir` prints a summary.
+4. **C emission.** `lepton_c_ir.py` emits C11. Aggregate C typedefs are
+   forward-declared and emitted in dependency order. The target descriptions in
+   `lepton_target.py` select scalar or x86-64 SSE2 code.
+5. **Native compilation.** The generated C is compiled by the host C compiler
+   for userland, or by `-m32 -ffreestanding` for the kernel.
+
+The compiler supports:
+
+- hosted and freestanding (`--freestanding`) modes;
+- 32-bit (`--m32`) and native userland builds;
+- scalar and x86-64 SSE2 targets;
+- `--dump-ir` and `--verify-ir`;
+- conversion diagnostics, with `--strict-types` turning lossy numeric and
+  unsafe pointer conversions into errors.
+
+## 3. Language
+
+### 3.1 Type system
+
+- **Integers:** `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`.
+- **Floats:** `f16`, `bf16`, `f32`, `f64`.
+- **Fixed-point:** `q7`, `q15`, `q31` in `[-1, 1)`, with saturating arithmetic.
+- **Other scalars:** `bool`, `char`, `str` (null-terminated).
+- **Vectors:** `v2f64`, `v4f32`, `v4i32`, `v8i16`, `v16i8`.
+- **Aggregates:** fixed-size arrays `[T; N]`, pointers `ptr[T]`, structs, enums.
+
+Declared types are enforced at bindings, assignments, calls, returns, and
+struct fields. Literals are lowered against their target type. Numeric and
+pointer conversions are explicit in the IR, with warning/error policy controlled
+by `--strict-types`.
+
+### 3.2 Declarations and mutation
+
+```lepton
+let immutable = 1;
+var counter: i32 = 0;
+counter += 1;
+
+var p = Point(x: 1, y: 2);
+p.x = 3;
+p.inner.x += 1;
+```
+
+- `let` is immutable; `var` is mutable.
+- Parameters are mutable local copies.
+- Pointer pointees remain mutable through an immutable pointer binding.
+- Assignment supports identifiers, fields, array/vector elements, pointer
+  elements, nested combinations, and compound operators (`+=`, `-=`, `*=`, `/=`,
+  `%=`, bitwise, and shifts).
+- Nested aggregate writes use copy-modify-write internally.
+
+### 3.3 Control flow and comparisons
+
+- `if`/`else`, `while`, and range-based `for` (`..`, `..=`).
+- `break` and `continue`.
+- Conditions and `&&`/`||`/`!` operands must be `bool`.
+- Numeric, bool, enum, and same-typed pointer comparisons.
+- Content-based string equality and ordering.
+- Structural `==`/`!=` for structs and arrays.
+- Aggregate ordering is rejected.
+- No `switch`, `do`/`while`, or ternary operator.
+
+### 3.4 Aggregates and conversions
+
+- Arrays are values; bare `[T; N]` parameters pass by value, while
+  `ptr[[T; N]]` gives by-reference access.
+- Arrays as struct fields, arrays of structs, nested arrays, and
+  self-referential structs through pointers are supported.
+- Recursive by-value aggregates are rejected.
+- Explicit array casts convert equal-length arrays element by element when both
+  element types are numeric or both are pointers.
+- There are no implicit array conversions.
+- Struct/array equality compares fields/elements recursively; strings by
+  content, vectors lane-wise, pointers by address, and floats with IEEE `==`.
+
+### 3.5 Memory
+
+```lepton
+let p = alloc([i32; 4]);
+p[0] = 7;
+free(p);            // hosted: releases; freestanding: no-op
+alloc_reset();      // freestanding: resets the bump heap
+```
+
+- Hosted mode uses `malloc`/`free`; `alloc_reset` is a no-op.
+- Freestanding mode uses a bump allocator. Individual `free` is not possible,
+  so `free` is a no-op; `alloc_reset` reclaims the entire heap and invalidates
+  all live allocations.
+- The kernel reserves a fixed 64 MB heap after the loaded model.
+
+## 4. Runtime and standard library
+
+The generated C does not call libm. Math helpers (`sqrt`, `rsqrt`, `exp`,
+`tanh`, `erf`, `cos`, `sin`), string helpers, allocation, and I/O are
+hand-written in `lepton_runtime.py` for hosted builds and in
+`kernel/src/runtime.c` for freestanding builds.
+
+### 4.1 GGUF parsing
+
+The standard library parses GGUF directly from memory:
+
+- header: magic `GGUF`, version, tensor count, KV count;
+- KV metadata, including arrays used by tokenizer vocabularies;
+- tensor table: names, dimensions, data types, byte offsets;
+- data alignment from `general.alignment` (default 32 bytes).
+
+### 4.2 Quantization
+
+- **Q4_0:** 18-byte blocks, 32 elements, f16 scale plus 16 packed bytes.
+- **Q8_0:** 34-byte blocks, 32 elements, f16 scale plus 32 int8 values.
+- F32 norm tensors are handled directly.
+
+Q4_K/Q5_K/Q6_K and grouped-query attention are not implemented.
+
+### 4.3 Transformer
+
+The forward pass implements a LLaMA-style network:
+
+- token embeddings;
+- multi-head attention with Q, K, V projections;
+- RoPE on Q and K;
+- a per-layer KV cache for autoregressive generation;
+- RMSNorm;
+- SwiGLU MLP;
+- final norm and vocabulary projection.
+
+The kernel re-dequantizes weights during each forward pass; a persistent
+dequantized-weight cache is future work.
+
+### 4.4 Tokenizer and sampling
+
+- BPE vocabulary from GGUF.
+- Greedy longest-match fallback for models without merge lists.
+- Temperature scaling and Top-K filtering with an xorshift32 PRNG.
+
+The merge path exists but is untested on TinyStories, which has no merges.
+
+## 5. Lepton OS
+
+### 5.1 Boot and memory layout
+
+- Multiboot 1; loads via GRUB or QEMU `-kernel` at 1 MiB.
+- Installs a flat GDT and IDT, remaps the PIC, and enables the x87 FPU and SSE.
+- The GGUF model is a Multiboot module accessed directly from RAM.
+- The bump heap is initialized after the module. It is a fixed 64 MB
+  reservation, not sized from the Multiboot memory map.
+
+### 5.2 Drivers
+
+- VGA text console, 80x25 at `0xB8000`.
+- PS/2 keyboard, scancode set 1, Shift support, 256-byte ring buffer.
+- COM1 serial at 38400 baud for headless QEMU.
+- PIT at 100 Hz.
+- PIC remapped to `0x20`-`0x2F`.
+
+### 5.3 REPL
+
+The kernel presents a `lepton>` prompt with backspace editing. Commands
+include:
+
+- inspection: `info`, `config`, `tensors`, `modules`, `matvec`;
+- tokenizer: `vocab`, `decodetok`, `encode`;
+- generation: `generate`, `genprompt`, `fwdpos`, `forward`.
+
+`config` currently prints hardcoded TinyStories-15M hyperparameters; GGUF
+metadata does not drive the inference path yet.
+
+## 6. Build and test
+
+```bash
+make test                 # hosted compiler tests (117)
+make test-sse             # SSE2 target tests (117)
+python3 tests/test_ir_verify.py
+python3 tests/test_conversions.py
+
+make kernel MODEL=models/tinystories.gguf
+make run-kernel MODEL=models/tinystories.gguf
+
+make iso MODEL=models/tinystories.gguf
+make run-iso
+```
+
+`make kernel` only builds `build/kernel/kernel.elf`; `run-kernel` launches
+QEMU with the model as a Multiboot module. `make flash USB=/dev/sdX` writes the
+ISO to a device and requires `sudo`; verify the device name first.
+
+## 7. Current limitations
+
+- **One model shape.** `n_embd=288`, `n_ff=768`, `n_layer=6`, `n_head=6`,
+  `head_dim=48`, vocab 32000, and a 256-position KV cache are hardcoded.
+- **Context safety.** The model declares a 128-token context but the kernel
+  reserves 256 positions and does not enforce the bound.
+- **Quantization coverage.** Q4_0/Q8_0/F32 only; no K-quants or GQA.
+- **Memory.** The bump allocator cannot reclaim individual blocks.
+  `alloc_reset` invalidates all live allocations; per-command reset boundaries
+  and null checks for `lp_alloc` are incomplete.
+- **Compiler gaps.** No `switch`, `raw` blocks, generics, closures, or
+  definite-assignment analysis. Lvalue bases are limited to variables, fields,
+  and indices.
+- **File I/O.** Freestanding file I/O is declared but not defined; the kernel
+  has no filesystem driver.
+- **Backends.** Scalar and x86-64 SSE2 only; AVX2 and ARM/NEON are future work.
+- **Performance.** Weights are re-dequantized on every token, and the inference
+  loop is single-threaded.
