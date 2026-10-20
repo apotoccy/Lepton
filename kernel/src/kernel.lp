@@ -619,6 +619,13 @@ fn piece_eq(model: ptr[u8], a_off: i64, a_len: i64,
     return true;
 }
 
+fn clear_kv_cache(kv_k: ptr[f32], kv_v: ptr[f32]) -> void {
+    for i in 0..(6 * 256 * 288) {
+        kv_k[i] = 0.0f;
+        kv_v[i] = 0.0f;
+    }
+}
+
 fn bpe_encode_word(model: ptr[u8],
                    tok_table: ptr[u32], tok_count: i64,
                    merge_table: ptr[u32], merge_count: i64,
@@ -1025,7 +1032,7 @@ fn main() {
     println("[7] Enabling interrupts");
     interrupts_init();
     println("    timer at 100 Hz, keyboard ready");
-    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, help");
+    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, help");
     println("");
 
     var line_buf = alloc([u8; 128]) as ptr[u8];
@@ -1042,6 +1049,7 @@ fn main() {
                     line_len = line_len - 1;
                 }
             } else if (ch == 10 as u8 || ch == 13 as u8) {
+                let cmd_mark = alloc_mark();
                 let text = read_str(line_buf, 0, line_len);
                 if (starts_with(text, "modules")) {
                     let n = mb_module_count();
@@ -1313,10 +1321,7 @@ fn main() {
                         let fp_m = mb_module_start(0 as u32) as ptr[u8];
                         let fp_w = scratch_bytes as ptr[f32];
                         let fp_a = activation_buf as ptr[f32];
-                        for ci in 0..(6 * 256 * 288) {
-                            kv_k_buf[ci] = 0.0f;
-                            kv_v_buf[ci] = 0.0f;
-                        }
+                        clear_kv_cache(kv_k_buf, kv_v_buf);
                         forward_token_at_pos(fp_m, fp_tok, fp_pos,
                                              6, 6, 48, fp_w, fp_a,
                                              kv_k_buf, kv_v_buf, rope_freqs,
@@ -1352,10 +1357,7 @@ fn main() {
 
                         let gen_w = scratch_bytes as ptr[f32];
                         let gen_a = activation_buf as ptr[f32];
-                        for ci in 0..(6 * 256 * 288) {
-                            kv_k_buf[ci] = 0.0f;
-                            kv_v_buf[ci] = 0.0f;
-                        }
+                        clear_kv_cache(kv_k_buf, kv_v_buf);
 
                         println("  generating 30 tokens (temp={gen_temp}, top_k={gen_k})...");
                         print("  [dbg: start] ");
@@ -1465,10 +1467,7 @@ fn main() {
                                 println("");
 
                                 /* Clear KV */
-                                for ci in 0..(6 * 256 * 288) {
-                                    kv_k_buf[ci] = 0.0f;
-                                    kv_v_buf[ci] = 0.0f;
-                                }
+                                clear_kv_cache(kv_k_buf, kv_v_buf);
                                 lp_rand_seed(ticks() + 1 as u32);
 
                                 /* Run forward on prompt tokens */
@@ -1506,11 +1505,15 @@ fn main() {
                             }
                         }
                     }
+                } else if (starts_with(text, "reset") && (text[5] == '\0' || text[5] == ' ')) {
+                    clear_kv_cache(kv_k_buf, kv_v_buf);
+                    println("  kv cache reset");
                 } else if (starts_with(text, "help")) {
-                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, help");
+                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, help");
                 } else if (line_len > 0) {
                     println("  {text}");
                 }
+                alloc_release(cmd_mark);
                 line_len = 0;
                 print("lepton> ");
             }

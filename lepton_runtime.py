@@ -419,6 +419,13 @@ static LP_UNUSED void lp_free(void *p) {
 static LP_UNUSED void lp_alloc_reset(void) {
     /* Hosted allocations are released individually with free(). */
 }
+static LP_UNUSED int64_t lp_alloc_mark(void) {
+    /* Hosted allocations are not bump-packed; marks are advisory. */
+    return 0;
+}
+static LP_UNUSED void lp_alloc_release(int64_t mark) {
+    (void)mark;
+}
 static LP_UNUSED const char *lp_cat(const char *a, const char *b) {
     lp_size la = 0, lb = 0, k;
     while (a[la]) la++;
@@ -847,6 +854,8 @@ typedef unsigned long lp_size;
 extern char       *lp_alloc(lp_size n);
 extern void        lp_free(void *p);
 extern void        lp_alloc_reset(void);
+extern int64_t     lp_alloc_mark(void);
+extern void        lp_alloc_release(int64_t mark);
 extern const char *lp_cat(const char *a, const char *b);
 extern const char *lp_str_i64(int64_t v);
 extern const char *lp_str_u64(uint64_t v);

@@ -13,7 +13,7 @@ freestanding 32-bit kernel code.
 
 Current status:
 
-- **127/127** compiler tests on scalar and x86-64 SSE2.
+- **130/130** compiler tests on scalar and x86-64 SSE2.
 - 13 IR-verifier tests and 12 conversion-policy tests.
 - TinyStories-15M boots and runs in QEMU and on a 2008-era Lenovo IdeaPad S9.
 - `fwdpos 0 1` predicts token **9038** (`Once`), matching the Python reference.
@@ -127,12 +127,19 @@ let p = alloc([i32; 4]);
 p[0] = 7;
 free(p);            // hosted: releases; freestanding: no-op
 alloc_reset();      // freestanding: resets the bump heap
+
+let mark = alloc_mark();
+let q = alloc([i32; 4]);
+alloc_release(mark);   // freestanding: rewinds to mark
 ```
 
-- Hosted mode uses `malloc`/`free`; `alloc_reset` is a no-op.
+- Hosted mode uses `malloc`/`free`; reset and mark/release are advisory no-ops.
 - Freestanding mode uses a bump allocator. Individual `free` is not possible,
-  so `free` is a no-op; `alloc_reset` reclaims the entire heap and invalidates
-  all live allocations.
+  so `free` is a no-op; `alloc_reset` reclaims the entire heap, and
+  `alloc_release(mark)` rewinds to a previous `alloc_mark()` position. Both
+  invalidate allocations made after the reset point.
+- The kernel marks the heap before each REPL command and releases transient
+  allocations afterward; long-lived buffers are allocated before the mark.
 - The kernel reserves a fixed 64 MB heap after the loaded model.
 
 ## 4. Runtime and standard library
@@ -238,9 +245,9 @@ ISO to a device and requires `sudo`; verify the device name first.
 - **Context safety.** The model declares a 128-token context but the kernel
   reserves 256 positions and does not enforce the bound.
 - **Quantization coverage.** Q4_0/Q8_0/F32 only; no K-quants or GQA.
-- **Memory.** The bump allocator cannot reclaim individual blocks.
-  `alloc_reset` invalidates all live allocations; per-command reset boundaries
-  and null checks for `lp_alloc` are incomplete.
+- **Memory.** The bump allocator cannot reclaim individual blocks. Mark/release
+  and `alloc_reset` invalidate allocations after their reset point, and
+  `lp_alloc` null checks are incomplete.
 - **Compiler gaps.** No generics, closures, or definite-assignment analysis.
   Array/vector indexing and field assignment still require lvalue bases.
 - **File I/O.** Freestanding file I/O is declared but not defined; the kernel

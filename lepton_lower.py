@@ -70,7 +70,7 @@ VEC_REDUCTIONS = {'sum': 'sum', 'vmax': 'max', 'vmin': 'min'}
 # or one-arg-math pattern. Each entry maps a source name to (op, arity)
 # where op is the IRVecBinOp op and arity is how many positional args
 # the source form takes.
-ALLOC_BUILTINS = {'free', 'alloc_reset'}
+ALLOC_BUILTINS = {'free', 'alloc_reset', 'alloc_mark', 'alloc_release'}
 
 VEC_BIN_OPS = {
     'vmax2':   ('vmax2',   2),
@@ -1704,6 +1704,26 @@ class Lowering:
             if e.args:
                 self.err("alloc_reset takes no arguments", e.pos)
             self.block.add(IRCall(None, 'lp_alloc_reset', [],
+                                  ('prim', 'void'), e.pos))
+            return None
+
+        if name == 'alloc_mark':
+            if e.args:
+                self.err("alloc_mark takes no arguments", e.pos)
+            dst = self.func.new_temp(('prim', 'i64'))
+            self.block.add(IRCall(dst, 'lp_alloc_mark', [],
+                                  ('prim', 'i64'), e.pos))
+            return dst
+
+        if name == 'alloc_release':
+            if len(e.args) != 1:
+                self.err("alloc_release takes exactly 1 argument", e.pos)
+            a = e.args[0]
+            if a.kind == 'namedarg':
+                self.err("alloc_release takes a positional argument", a.pos)
+            mark = self.lower_expr_as(a, ('prim', 'i64'), a.pos,
+                                      "alloc_release mark")
+            self.block.add(IRCall(None, 'lp_alloc_release', [mark],
                                   ('prim', 'void'), e.pos))
             return None
 

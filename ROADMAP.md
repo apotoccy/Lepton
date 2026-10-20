@@ -4,7 +4,7 @@ Compiler and OS for edge AI inference, from 32-bit PCs to modern devices.
 
 ## Current status (October 2026)
 
-- **Compiler:** single IR pipeline (AST → IR → verify → C11); 127/127 compiler
+- **Compiler:** single IR pipeline (AST → IR → verify → C11); 130/130 compiler
   tests pass on scalar and SSE2, plus 13 IR-verifier and 12 conversion-policy
   unit tests.
 - **OS:** 32-bit Multiboot kernel, GRUB ISO, QEMU boot, and an interactive REPL.
@@ -40,7 +40,7 @@ compiler or standard-library code.
 
 ## 🏆 Major Milestones Achieved
 
-- **Compiler:** single IR pipeline, 127/127 tests passing on scalar and SSE2
+- **Compiler:** single IR pipeline, 130/130 tests passing on scalar and SSE2
   plus 13 IR-verifier and 12 conversion-policy tests, emitting portable C11.
 - **Bare-Metal AI:** a 15M-parameter TinyStories model on a 2008 Lenovo IdeaPad
   S9 (Intel Atom), with no OS, libc, or Python; reproducible in QEMU and as a
@@ -88,6 +88,7 @@ compiler or standard-library code.
       or pointer elements
 - [x] `free(ptr)` and `alloc_reset()`; freestanding free is a no-op and reset
       reclaims the bump heap
+- [x] `alloc_mark()`/`alloc_release(mark)` and per-command REPL reclamation
 - [x] Language reference (`docs/LANGUAGE.md`)
 - [x] `pyflakes` step in CI and `pyflakes`-clean compiler modules
 - [ ] Remove the remaining commented AST-emitter code and update docstrings
@@ -277,7 +278,7 @@ tensors, not the 15M model label.
 ### 4. OS UX: scrollback, history, and introspection
 
 - [ ] Simple ring buffer for command history (Up/Down arrows in the REPL)
-- [ ] `reset` command to clear the KV cache without rebooting
+- [x] `reset` command to clear the KV cache without rebooting
 - [ ] `mem` command showing heap usage and limits
 - [ ] `perf` command showing per-phase timings
 - [ ] Prompt/generation length guard tied to the configured context length
@@ -315,9 +316,8 @@ The original goal was 32-bit PCs *and* modern devices.
       sizes require source changes
 - [ ] The model declares `context_length=128`, the kernel reserves 256
       positions, and no position bound is enforced yet
-- [ ] Repeated `vocab`/`encode`/`tensors` commands still leak until call sites
-      use `alloc_reset` at a safe boundary; `free` is a no-op in the bump
-      allocator and `lp_alloc` null returns are not checked everywhere
+- [ ] `lp_alloc` null returns are not checked everywhere; `free` remains a
+      no-op in the bump allocator
 - [ ] `lp_alloc_init` is declared as `(ptr[u8], i64)` in Lepton but defined as
       `(void *, unsigned long)` in C; fix the ABI mismatch
 - [ ] The heap is a fixed 64 MB reservation after the module, not sized from
@@ -332,8 +332,6 @@ The original goal was 32-bit PCs *and* modern devices.
 - [ ] Ring buffer drops input silently on overflow (128 chars max)
 - [ ] `generate`/`genprompt` are fixed at 30 tokens
 - [ ] `genprompt ... 0` is coerced to temperature 1.0; use `0.001` for greedy
-- [ ] No KV-cache reset between runs (requires kernel reboot); allocation reset
-      is available through `alloc_reset`
 
 **Tooling and testing**
 

@@ -12,14 +12,14 @@ the full conversion policy and current gaps, is
 
 ## Current status
 
-- **127/127** compiler regression tests on scalar and x86-64 SSE2.
+- **130/130** compiler regression tests on scalar and x86-64 SSE2.
 - 13 IR-verifier tests and 12 conversion-policy tests.
 - 64-bit and 32-bit userland builds, freestanding 32-bit kernel, and GRUB ISO.
 - `let` immutability, compound assignment, field/index/nested lvalues.
 - Content-based string comparison and structural struct/array equality.
 - Complete vector min/max/comparison/select operations.
 - Explicit element-wise array casts.
-- `free` and `alloc_reset` allocator builtins.
+- `free`, `alloc_reset`, `alloc_mark`, and `alloc_release` allocator builtins.
 
 ## 1. Source files and comments
 
@@ -333,14 +333,20 @@ p[0] = 7;
 
 free(p);            // hosted: releases p; freestanding: no-op
 alloc_reset();      // freestanding: reclaims the whole bump heap
+
+let mark = alloc_mark();
+let q = alloc([i32; 4]);   // transient
+alloc_release(mark);       // freestanding: reclaims q and later allocations
 ```
 
 `alloc([T; N])` returns `ptr[[T; N]]`. In hosted builds the allocator is
-`malloc`-based, `free` releases a block, and `alloc_reset` is a no-op. In
-freestanding builds the kernel uses a bump allocator: individual `free` is not
-possible, so `free` is a no-op and `alloc_reset` reclaims everything.
-`alloc_reset` invalidates every live allocation, so call it only at a safe
-boundary.
+`malloc`-based, `free` releases a block, and reset/mark/release are advisory
+no-ops. In freestanding builds the kernel uses a bump allocator: individual
+`free` is not possible, so `free` is a no-op; `alloc_reset` reclaims everything,
+and `alloc_release(mark)` rewinds to a previous `alloc_mark()` position. Both
+invalidate allocations made after the reset point, so use them only at safe
+boundaries. The kernel marks the heap before each REPL command and releases
+transient allocations afterward.
 
 ## 11. Builtins
 

@@ -14,7 +14,7 @@ see [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
-- Compiler: **127/127** regression tests on scalar and x86-64 SSE2, plus 13
+- Compiler: **130/130** regression tests on scalar and x86-64 SSE2, plus 13
   IR-verifier tests and 12 conversion-policy tests.
 - Build: 64-bit and 32-bit userland programs, the freestanding 32-bit kernel,
   and the GRUB ISO all build.
@@ -90,16 +90,19 @@ line editing.
 - `decodetok <id>` — decode one token ID.
 - `encode "<text>"` — encode text to token IDs.
 
-### Generation
+### Generation and reset
 
 - `generate [temp] [top_k]` — 30 tokens from BOS. `generate 0` selects the
   greedy path.
 - `genprompt "<text>" [temp] [top_k]` — encode a prompt, prefill, and generate
   30 continuation tokens. Use a small positive temperature such as `0.001` for
   deterministic output; a literal `0` is currently coerced to `1.0`.
+- `reset` — clear the KV cache without rebooting.
 
-Both generation commands are fixed at 30 tokens. The KV cache is not reset
-between commands; reboot the kernel for a clean run.
+Both generation commands are fixed at 30 tokens. `generate`, `genprompt`, and
+`fwdpos` clear the KV cache before they run, and `reset` provides an explicit
+cleanup command. Each REPL command also reclaims its transient heap allocations
+with an allocator mark/release around the command.
 
 ## 5. Building and running
 
@@ -151,10 +154,10 @@ with GRUB installed and `kernel.elf` plus the model in `/boot` also works.
   grouped-query attention are not implemented.
 - **Context safety.** The model declares a 128-token context but the kernel
   reserves 256 positions and does not yet enforce the bound.
-- **Memory.** `free` is a no-op in the freestanding bump allocator.
-  `alloc_reset()` reclaims the whole heap but invalidates every live allocation,
-  including model buffers. Per-command allocation sites still need a safe reset
-  boundary; not every `lp_alloc` result is null-checked.
+- **Memory.** `free` is a no-op in the freestanding bump allocator. The REPL
+  marks the heap before each command and releases transient allocations after
+  it; `alloc_reset()` reclaims the whole heap but invalidates long-lived
+  buffers. Not every `lp_alloc` result is null-checked.
 - **File I/O.** Freestanding file I/O symbols are declared but not defined; the
   kernel has no filesystem driver.
 - **Compiler gaps.** Array/vector indexing and field assignment require lvalue

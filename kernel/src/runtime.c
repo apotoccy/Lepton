@@ -74,6 +74,16 @@ void lp_alloc_reset(void) {
     heap_used = 0;
 }
 
+long long lp_alloc_mark(void) {
+    return (long long)heap_used;
+}
+
+void lp_alloc_release(long long mark) {
+    if (mark >= 0 && (unsigned long)mark <= heap_used) {
+        heap_used = (unsigned long)mark;
+    }
+}
+
 //char *lp_alloc(unsigned long n) {
 //    n = (n + 15UL) & ~15UL;
 //    if (heap_used + n > HEAP_SIZE) return (char *)0;

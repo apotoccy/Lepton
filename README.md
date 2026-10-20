@@ -11,7 +11,7 @@ as a GRUB ISO.
 
 ## Status (as of October 2026)
 
-- **Compiler:** 127/127 regression tests pass with both the scalar and x86-64
+- **Compiler:** 130/130 regression tests pass with both the scalar and x86-64
   SSE2 targets (`make test`, `make test-sse`), plus 13 IR-verifier and 12
   conversion-policy unit tests.
 - **Build:** 64-bit and 32-bit userland programs build; the freestanding 32-bit
@@ -78,8 +78,11 @@ as a GRUB ISO.
   numeric or pointer element types element by element, including `f16`/`bf16`
   and quantized conversions. There are no implicit array conversions.
 - **Allocator control:** `free(ptr)` releases a hosted allocation;
-  `alloc_reset()` reclaims the whole freestanding bump heap. In freestanding
-  builds `free` is a no-op.
+  `alloc_reset()` reclaims the whole freestanding bump heap;
+  `alloc_mark()`/`alloc_release(mark)` reclaim transient allocations. The kernel
+  marks the heap before each REPL command and releases it afterward, and has a
+  `reset` command that clears the KV cache. In freestanding builds `free` is a
+  no-op.
 - **Self-contained runtime:** math (`sqrt`, `exp`, `tanh`, `erf`, `cos`, `sin`),
   sampling, GGUF parsing, and print/string helpers are hand-written. Generated
   code does not call libm. Hosted programs use the host C library; the kernel
@@ -189,9 +192,9 @@ make test
 make test-sse
 ```
 
-Expected results: `make test` reports `127 passed, 0 failed`,
+Expected results: `make test` reports `130 passed, 0 failed`,
 `IR verifier: 13 tests passed`, and `Conversion policy: 12 tests passed`;
-`make test-sse` reports `127 passed, 0 failed`.
+`make test-sse` reports `130 passed, 0 failed`.
 
 ### 2. Build and run a userland program
 
@@ -296,11 +299,11 @@ These are the boundaries of the current implementation, not a wish list; see
   `var` is legal and yields zero.
 - **Memory management.** The kernel uses a bump allocator. `free` is a no-op
   in freestanding builds; `alloc_reset` reclaims the whole heap but invalidates
-  every live allocation. Commands that allocate per item (`vocab`, `encode`,
-  `tensors`, token decoding) still leak across REPL invocations until they call
-  `alloc_reset` at a safe boundary, and not every `lp_alloc` result is checked
-  for null. The heap is a fixed 64 MB reservation after the loaded module, not
-  dynamically sized from the Multiboot memory map.
+  every live allocation. Each REPL command marks the heap and releases its
+  transient allocations afterward, so `vocab`, `encode`, `tensors`, and token
+  decoding no longer leak between commands. Long-lived buffers are allocated
+  before the mark. Not every `lp_alloc` result is checked for null, and the heap
+  remains a fixed 64 MB reservation after the loaded module.
 - **Quantization coverage.** Q4_K/Q5_K/Q6_K and grouped-query attention (GQA)
   are not implemented. The kernel's linear layers handle Q4_0/Q8_0 weights plus
   F32 norm tensors; other tensor types are not supported.

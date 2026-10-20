@@ -125,6 +125,8 @@ RUNTIME_CALLS = {
     'lp_write_file': ([STR, ANY_PTR, I64], I64),
     'lp_free':     ([ANY_PTR], VOID),
     'lp_alloc_reset': ([], VOID),
+    'lp_alloc_mark': ([], I64),
+    'lp_alloc_release': ([I64], VOID),
     'lp_read_str': ([ANY_PTR, I64, I64], STR),
     'lp_str_eq':   ([STR, STR], BOOL),
     'lp_str_cmp':  ([STR, STR], I32),
