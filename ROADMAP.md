@@ -259,8 +259,8 @@ tensors, not the 15M model label.
 - [ ] Validate tensor dimensions and types at load
 - [ ] Remove the remaining tokenizer fixed-buffer limits (merge table, word
       and piece buffers, output ID capacity)
-- [x] Add grouped-query attention (`n_head_kv`); reference validation with a
-      dedicated GQA fixture is still pending
+- [x] Add grouped-query attention (`n_head_kv`) and validate it against a
+      two-position synthetic GQA reference
 - [ ] Add Q4_K/Q5_K/Q6_K dequantization or, preferably, quantized dot products
 - [ ] Plan memory for 1B+ models. They do not fit the current 64 MB heap;
       this likely needs ATA/SD streaming or a larger-RAM target, and should be
@@ -321,7 +321,6 @@ The original goal was 32-bit PCs *and* modern devices.
 **Kernel and OS**
 
 - [ ] Q4_K/Q5_K/Q6_K and general F32 linear weights are not implemented.
-      GQA is implemented but still needs a dedicated reference fixture.
       Inference workspaces are config-sized within a 60 MB budget and a
       256-position context cap.
 - [ ] `lp_alloc` null returns are not checked everywhere; `free` remains a

@@ -996,7 +996,7 @@ fn main() {
     println("[7] Enabling interrupts");
     interrupts_init();
     println("    timer at 100 Hz, keyboard ready");
-    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, filetest, help");
+    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, gqapair, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, filetest, help");
     println("");
 
     var line_buf = alloc([u8; 128]) as ptr[u8];
@@ -1280,6 +1280,32 @@ fn main() {
                             println("'");
                         }
                     }
+                } else if (starts_with(text, "gqapair")) {
+                    if (mb_module_count() == 0 as u32) {
+                        println("  no module loaded");
+                    } else {
+                        let gp_m = mb_module_start(0 as u32) as ptr[u8];
+                        let gp_cfg = model_config(gp_m);
+                        clear_kv_cache(kv_k_buf, kv_v_buf,
+                                       active_cfg.n_layer,
+                                       active_cfg.max_seq,
+                                       active_cfg.n_head_kv * active_cfg.head_dim);
+                        if (forward_token_at_pos(gp_m, gp_cfg, 1, 0,
+                                                 scratch_bytes as ptr[f32],
+                                                 activation_buf,
+                                                 kv_k_buf, kv_v_buf,
+                                                 rope_freqs, logits_buf)) {
+                            if (forward_token_at_pos(gp_m, gp_cfg, 2, 1,
+                                                     scratch_bytes as ptr[f32],
+                                                     activation_buf,
+                                                     kv_k_buf, kv_v_buf,
+                                                     rope_freqs, logits_buf)) {
+                                let gp_best = lp_argmax(logits_buf,
+                                                        gp_cfg.vocab_size as i32);
+                                println("  pos1 token = {gp_best}");
+                            }
+                        }
+                    }
                 } else if (starts_with(text, "fwdpos")) {
                     if (mb_module_count() == 0 as u32) {
                         println("  no module loaded");
@@ -1529,7 +1555,7 @@ fn main() {
                     let wr = write_file("test.bin", fbuf, 4);
                     println("  file_size={fs} read={rd} write={wr}");
                 } else if (starts_with(text, "help")) {
-                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, filetest, help");
+                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, gqapair, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, filetest, help");
                 } else if (line_len > 0) {
                     println("  {text}");
                 }

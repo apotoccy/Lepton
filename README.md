@@ -186,9 +186,11 @@ Lepton/
 │
 ├── tools/                  # Python utilities
 │   ├── gen_test_gguf.py    # Synthetic single-tensor GGUF for smoke tests
+│   ├── gen_gqa_gguf.py     # Tiny synthetic GQA model fixture
 │   ├── dump_dims.py        # Dump GGUF tensor dimensions
 │   ├── verify_embed.py     # Embedding reference check
 │   ├── verify_forward.py   # Partial forward reference (V/output; skips Q/K)
+│   ├── verify_gqa.py       # Two-position GQA reference check
 │   └── verify_tokenize.py  # Tokenizer reference (requires merges)
 │
 ├── models/                 # Place downloaded .gguf models here
@@ -285,6 +287,22 @@ runs `sudo dd`, so verify the device name carefully.
 
 The kernel is a 32-bit Multiboot 1 image. On real hardware, use legacy BIOS boot
 (disable UEFI/Secure Boot or enable CSM).
+
+### 5. Validate the GQA fixture
+
+```bash
+python3 tools/gen_gqa_gguf.py build/gqa.gguf
+python3 tools/verify_gqa.py build/gqa.gguf
+make run-kernel MODEL=build/gqa.gguf
+```
+
+At the prompt, run:
+
+```text
+gqapair
+```
+
+The reference and the kernel should both report `pos1 token = 3`.
 
 ## Model naming note
 
