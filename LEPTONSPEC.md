@@ -189,7 +189,7 @@ dequantized-weight cache is future work.
 - Unknown bytes map to `<0xNN>` vocabulary entries when available.
 - Temperature scaling and Top-K filtering with an xorshift32 PRNG.
 
-The merge path exists but is untested on TinyStories, which has no merges.
+The merge path is exercised by a synthetic fixture; TinyStories has no merges.
 
 ## 5. Lepton OS
 

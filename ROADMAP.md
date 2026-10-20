@@ -173,13 +173,13 @@ Generation & Tokenizer:
 - [x] Sampling: temperature, top-k, xorshift32 PRNG
 - [x] Tokenizer decode (BPE vocab offsets, U+2581 substitution)
 - [x] Tokenizer encode (BPE merges path plus greedy fallback) with bounded
-      vocab/piece buffers and `<0xNN>` byte fallback; the merge path is still
-      untested on TinyStories because it has no merges
+      vocab/piece buffers, `<0xNN>` byte fallback, and a synthetic merge-path
+      test
 - [x] Prompt-based generation (`genprompt "..." T K N`), with temperature
       `0` selecting greedy output
 - [x] Tokenizer byte fallback to `<0xNN>` vocabulary entries
 - [x] Bounds-safe token table, decode IDs, merge table, and piece buffers
-- [ ] Test the BPE merge path with a model that has merges
+- [x] Test the BPE merge path with a synthetic merge fixture
 
 ## Phase 4 — Backends (Deferred)
 
@@ -325,7 +325,6 @@ The original goal was 32-bit PCs *and* modern devices.
       Inference workspaces are config-sized within a 60 MB budget and a
       256-position context cap.
 - [ ] `free` remains a no-op in the bump allocator
-- [ ] BPE merge path remains untested; piece slots are bounded to 256 bytes
 - [x] Ctrl/Alt tracking, Ctrl+Alt+Del reboot, and `reboot` command
 - [x] ACPI `poweroff` command with emulator fallbacks
 - [x] Architecture-aware GGUF config keys and tensor-shape fallbacks

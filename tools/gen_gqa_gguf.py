@@ -11,7 +11,6 @@ against tools/verify_gqa.py. This is a test fixture, not a useful model.
 import random
 import struct
 import sys
-import zlib
 
 N_EMBD = 32
 N_FF = 64

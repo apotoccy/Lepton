@@ -30,7 +30,7 @@ jobs:
         run: |
           python3 -m pip install --disable-pip-version-check pyflakes==3.2.0
           python3 -m pyflakes lepton_*.py leptonc.py \
-            tests/test_ir_verify.py tests/test_conversions.py
+            tests/test_ir_verify.py tests/test_conversions.py tools/*.py
 
       - name: Compiler tests (scalar)
         run: make test
@@ -43,6 +43,14 @@ jobs:
 
       - name: Kernel build (freestanding, 32-bit)
         run: make kernel
+
+      - name: GGUF fixture references
+        run: |
+          mkdir -p build
+          python3 tools/gen_gqa_gguf.py build/gqa.gguf
+          python3 tools/verify_gqa.py build/gqa.gguf
+          python3 tools/gen_merge_gguf.py build/merge.gguf
+          python3 tools/verify_merge.py build/merge.gguf
 
 # QEMU/inference smoke tests are intentionally not run here: they require
 # qemu-system-i386 and a GGUF model, neither of which is tracked in Git.

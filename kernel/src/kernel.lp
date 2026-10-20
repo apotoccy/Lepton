@@ -571,11 +571,11 @@ fn build_merge_offsets(model: ptr[u8], merge_table: ptr[u32]) -> i64 {
 }
 
 fn piece_eq(model: ptr[u8], a_off: i64, a_len: i64,
-            b_off: i64, b_len: i64) -> bool {
+            b_buf: ptr[u8], b_off: i64, b_len: i64) -> bool {
     if (a_len != b_len) { return false; }
     var i: i64 = 0;
     while (i < a_len) {
-        if (read_u8(model, a_off + i) != read_u8(model, b_off + i)) {
+        if (read_u8(model, a_off + i) != b_buf[b_off + i]) {
             return false;
         }
         i = i + 1;
@@ -697,10 +697,20 @@ fn bpe_encode_word(model: ptr[u8],
     var m_n: i64 = 0;
     var m_i: i64 = 0;
     while (m_i < word_len) {
-        pieces_buf[m_i * 256] = word_buf[m_i];
-        pieces_len[m_i] = 1 as u32;
+        let lead = word_buf[m_i] as i64;
+        var clen: i64 = 1;
+        if (lead >= 0xF0) { clen = 4; }
+        else if (lead >= 0xE0) { clen = 3; }
+        else if (lead >= 0xC0) { clen = 2; }
+        if (m_i + clen > word_len) { clen = 1; }
+        var q: i64 = 0;
+        while (q < clen) {
+            pieces_buf[m_n * 256 + q] = word_buf[m_i + q];
+            q = q + 1;
+        }
+        pieces_len[m_n] = clen as u32;
         m_n = m_n + 1;
-        m_i = m_i + 1;
+        m_i = m_i + clen;
     }
 
     var progress: bool = true;
@@ -733,8 +743,9 @@ fn bpe_encode_word(model: ptr[u8],
             while (p < m_n - 1) {
                 let p1_len = pieces_len[p] as i64;
                 let p2_len = pieces_len[p+1] as i64;
-                if (piece_eq(model, x_off, x_len, p * 256, p1_len)
-                        && piece_eq(model, y_off, y_len, (p+1) * 256, p2_len)) {
+                if (piece_eq(model, x_off, x_len, pieces_buf, p * 256, p1_len)
+                        && piece_eq(model, y_off, y_len, pieces_buf,
+                                    (p+1) * 256, p2_len)) {
                     found_p = p;
                     break;
                 }
@@ -780,7 +791,8 @@ fn bpe_encode_word(model: ptr[u8],
             let tlen = read_u64(model, toff) as i64;
             if (tlen == piece_len) {
                 let tstr = toff + 8;
-                if (piece_eq(model, tstr, tlen, t * 256, piece_len)) {
+                if (piece_eq(model, tstr, tlen, pieces_buf,
+                             t * 256, piece_len)) {
                     id = tok;
                     break;
                 }

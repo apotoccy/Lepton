@@ -187,10 +187,12 @@ Lepton/
 ├── tools/                  # Python utilities
 │   ├── gen_test_gguf.py    # Synthetic single-tensor GGUF for smoke tests
 │   ├── gen_gqa_gguf.py     # Tiny synthetic GQA model fixture
+│   ├── gen_merge_gguf.py   # Tiny tokenizer fixture with BPE merges
 │   ├── dump_dims.py        # Dump GGUF tensor dimensions
 │   ├── verify_embed.py     # Embedding reference check
-│   ├── verify_forward.py   # Partial forward reference (V/output; skips Q/K)
+│   ├── verify_forward.py   # Full Q/K/attention reference for TinyStories
 │   ├── verify_gqa.py       # Two-position GQA reference check
+│   ├── verify_merge.py     # Merge-tokenizer reference check
 │   └── verify_tokenize.py  # Tokenizer reference (requires merges)
 │
 ├── models/                 # Place downloaded .gguf models here
@@ -309,6 +311,38 @@ gqapair
 
 The reference and the kernel should both report `pos1 token = 3`.
 
+### 6. Validate the merge tokenizer
+
+```bash
+python3 tools/gen_merge_gguf.py build/merge.gguf
+python3 tools/verify_merge.py build/merge.gguf
+make run-kernel MODEL=build/merge.gguf
+```
+
+At the prompt:
+
+```text
+encode ab
+```
+
+Both should resolve to token **5** (`▁ab`).
+
+### 7. Validate the full forward reference
+
+With `models/tinystories.gguf` present:
+
+```bash
+python3 tools/verify_forward.py models/tinystories.gguf
+```
+
+The reference runs the tokenized prompt `Once upon a time` through Q/K/V
+attention, RoPE, six layers, and the output projection. It should predict
+token **29892** (`,`), matching the first greedy token from:
+
+```text
+genprompt "Once upon a time" 0 1 1
+```
+
 ## Model naming note
 
 The reference model is called TinyStories-15M, but the GGUF stores about 24.4M
@@ -324,8 +358,8 @@ These are the boundaries of the current implementation, not a wish list; see
 - **Model dimensions.** Activation, KV, logits, and token-table workspaces are
   sized from GGUF metadata, subject to a 60 MB budget and a 256-position
   context cap. Q4_K/Q5_K/Q6_K and general F32 linear weights are not
-  implemented; tokenizer merge/ID buffers still have fixed limits. Only
-  Q4_0/Q8_0 weights and F32 norms are handled.
+  implemented; tokenizer buffers are capacity-checked for the line and prompt
+  limits. Only Q4_0/Q8_0 weights and F32 norms are handled.
 - **Context safety.** The configured `max_seq` is enforced by the forward guard
   and generation loops, with a hard cap of 256 KV positions. The KV cache is
   allocated for exactly `max_seq` positions.
@@ -348,9 +382,9 @@ These are the boundaries of the current implementation, not a wish list; see
 - **Freestanding file I/O.** `lp_file_size`, `lp_read_file_at`, and
   `lp_write_file` are defined in the kernel and return `-1`; there is no
   filesystem driver. Hosted builds use real file I/O.
-- **Tokenizer edge cases.** The BPE merge path remains untested on this model
-  (TinyStories has no merges); piece buffers and vocab/count checks are now
-  bounded, and unknown bytes map to GGUF `<0xNN>` tokens when present.
+- **Tokenizer edge cases.** The BPE merge path is exercised by a synthetic
+  fixture; piece buffers and vocab/count checks are bounded, and unknown bytes
+  map to GGUF `<0xNN>` tokens when present.
 - **One backend.** Only scalar and x86-64 SSE2 are implemented. There is no
   AVX2, NEON/ARM, LLVM IR, or WASM backend yet.
 

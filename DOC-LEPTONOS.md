@@ -67,7 +67,8 @@ freestanding C runtime.
 - **Tokenizer.** Loads the BPE vocabulary from GGUF. A greedy longest-match
   fallback handles models without merge lists, and unknown bytes fall back to
   `<0xNN>` vocabulary entries. Piece buffers and vocab counts are bounded. The
-  merge path is present but untested on TinyStories, which has no merges.
+  merge path is exercised by `tools/gen_merge_gguf.py`; TinyStories itself has
+  no merges.
 - **Sampling.** Temperature scaling, Top-K filtering, and an xorshift32 PRNG.
 
 The kernel currently re-dequantizes weights during each forward pass. A

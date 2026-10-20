@@ -199,8 +199,11 @@ def step(token, pos):
 
 logits0 = step(1, 0)
 logits1 = step(2, 1)
+best0 = max(range(len(logits0)), key=lambda i: logits0[i])
 best1 = max(range(len(logits1)), key=lambda i: logits1[i])
 print(f'GQA reference: n_embd={n_embd} n_head={n_head} n_head_kv={n_head_kv} kv_dim={kv_dim}')
-print(f'pos0 argmax = {max(range(len(logits0)), key=lambda i: logits0[i])}')
+print(f'pos0 argmax = {best0}')
 print(f'pos1 predicted token = {best1}  logit = {logits1[best1]:.6f}')
 print('pos1 logits =', ' '.join(f'{v:.4f}' for v in logits1))
+assert best0 == 15, best0
+assert best1 == 3, best1
