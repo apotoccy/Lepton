@@ -20,6 +20,7 @@ extern fn mb_module_end(idx: u32) -> u32;
 extern fn lp_alloc_init(start: ptr[u8], size: i64) -> void;
 extern fn lp_alloc_bytes(n: i64) -> ptr[u8];
 extern fn lp_reboot() -> void;
+extern fn lp_poweroff() -> void;
 
 
 fn starts_with(s: str, prefix: str) -> bool {
@@ -132,6 +133,7 @@ fn model_config(model: ptr[u8]) -> ModelConfig {
 
 fn default_model_config() -> ModelConfig {
     return ModelConfig(
+        architecture: "llama",
         n_embd: 288, n_ff: 768, n_layer: 6, n_head: 6,
         n_head_kv: 6, head_dim: 48, max_seq: 128,
         vocab_size: 32000, rms_eps: 1e-5f,
@@ -141,6 +143,9 @@ fn default_model_config() -> ModelConfig {
 /* Shape and attention requirements of the current compiled path. GQA is
    parsed but not implemented yet. Returns an empty string when supported. */
 fn config_issue(cfg: ModelConfig) -> str {
+    if (cfg.architecture != "llama") {
+        return "architecture is not supported (expected llama)";
+    }
     if (cfg.n_embd <= 0) { return "invalid n_embd"; }
     if (cfg.n_embd % 32 != 0) { return "n_embd is not a multiple of 32"; }
     if (cfg.n_ff <= 0) { return "invalid n_ff"; }
@@ -199,6 +204,7 @@ fn alloc_or_panic(n: i64) -> ptr[u8] {
 }
 
 fn print_model_config(cfg: ModelConfig) -> void {
+    println("  arch      = {cfg.architecture}");
     println("  n_embd    = {cfg.n_embd}");
     println("  n_ff      = {cfg.n_ff}");
     println("  n_layer   = {cfg.n_layer}");
@@ -980,7 +986,7 @@ fn main() {
     println("[7] Enabling interrupts");
     interrupts_init();
     println("    timer at 100 Hz, keyboard ready");
-    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, filetest, help");
+    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, filetest, help");
     println("");
 
     var line_buf = alloc([u8; 128]) as ptr[u8];
@@ -1504,6 +1510,8 @@ fn main() {
                     println("  kv cache reset");
                 } else if (starts_with(text, "reboot")) {
                     lp_reboot();
+                } else if (starts_with(text, "poweroff")) {
+                    lp_poweroff();
                 } else if (starts_with(text, "filetest")) {
                     let fs = file_size("test.bin");
                     let fbuf = alloc([u8; 4]);
@@ -1511,7 +1519,7 @@ fn main() {
                     let wr = write_file("test.bin", fbuf, 4);
                     println("  file_size={fs} read={rd} write={wr}");
                 } else if (starts_with(text, "help")) {
-                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, filetest, help");
+                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, filetest, help");
                 } else if (line_len > 0) {
                     println("  {text}");
                 }

@@ -87,6 +87,7 @@ line editing.
 - `matvec` — diagnostic matrix-vector multiplication on the first tensor.
 - `filetest` — exercise the freestanding file I/O failure contract.
 - `reboot` — reboot the machine; Ctrl+Alt+Del does the same from the keyboard.
+- `poweroff` — shut down via ACPI PM1, with QEMU/emulator port fallbacks.
 
 ### Tokenizer
 
@@ -103,14 +104,17 @@ line editing.
   deterministic output; a literal `0` is currently coerced to `1.0`.
 - `reset` — clear the KV cache without rebooting.
 - `reboot` — reset the machine; Ctrl+Alt+Del also works.
+- `poweroff` — power down through ACPI when the firmware exposes it.
 
 Both generation commands are fixed at 30 tokens. `generate`, `genprompt`, and
 `fwdpos` clear the KV cache before they run, and `reset` provides an explicit
 cleanup command. Each REPL command also reclaims its transient heap allocations
 with an allocator mark/release around the command.
 
-Configuration and inference problems (unsupported shapes, workspace budget,
-context bounds) are reported as soft errors and return to the prompt. A fatal
+Configuration parsing is architecture-aware and falls back to tensor shapes
+when metadata keys are missing. Configuration and inference problems
+(unsupported shapes, workspace budget, context bounds) are reported as soft
+errors with a specific reason and return to the prompt. A fatal
 panic prints `Ctrl+Alt+Del to reboot` and enables interrupts so the keyboard
 reset combination can recover the machine.
 

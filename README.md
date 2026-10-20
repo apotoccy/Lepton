@@ -82,8 +82,9 @@ as a GRUB ISO.
   numeric or pointer element types element by element, including `f16`/`bf16`
   and quantized conversions. There are no implicit array conversions.
 - **GGUF configuration:** the kernel parses `ModelConfig` from GGUF metadata
-  (embedding/FFN widths, layers, heads, KV heads, RoPE dimension, context
-  length, vocabulary, and RMS epsilon), displays it via `config`, and sizes
+  using `general.architecture` plus tensor-shape fallbacks (embedding/FFN
+  widths, layers, heads, KV heads, RoPE dimension, context length, vocabulary,
+  and RMS epsilon), displays it via `config`, and sizes
   its activation, KV, logits, and token table workspaces from it. Inference is
   rejected if the shape is unsupported or exceeds the 60 MB workspace budget.
   GQA is parsed but not implemented yet.
@@ -98,7 +99,8 @@ as a GRUB ISO.
   code does not call libm. Hosted programs use the host C library; the kernel
   links only libgcc for 64-bit integer helpers.
 - **Interactive OS:** VGA text console, PS/2 and serial keyboard, 100 Hz PIT,
-  interrupts, and a live REPL with `reset`, `reboot`, and Ctrl+Alt+Del. Expected
+  interrupts, and a live REPL with `reset`, `reboot`, `poweroff`, Ctrl+Alt+Del,
+  and ACPI shutdown. Expected
   inference/configuration errors return to the prompt; fatal panics print a
   reboot hint.
 - **Verified target:** TinyStories-15M on a 2008 Lenovo IdeaPad S9 (Intel Atom),
@@ -259,6 +261,7 @@ generate 0
 genprompt "Once upon a time" 0.001 1
 reset
 reboot
+poweroff
 filetest
 ```
 

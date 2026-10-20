@@ -216,10 +216,13 @@ include:
 - inspection: `info`, `config`, `tensors`, `modules`, `matvec`;
 - tokenizer: `vocab`, `decodetok`, `encode`;
 - generation: `generate`, `genprompt`, `fwdpos`, `forward`;
-- maintenance: `reset` (KV cache), `reboot` (or Ctrl+Alt+Del), `filetest`.
+- maintenance: `reset` (KV cache), `reboot` (or Ctrl+Alt+Del), `poweroff`,
+  `filetest`.
 
 Expected configuration/inference errors are soft errors that return to the
-prompt. Fatal panics print a Ctrl+Alt+Del reboot hint.
+prompt. Configuration parsing is architecture-aware and falls back to tensor
+shapes when keys are missing. Fatal panics print a Ctrl+Alt+Del reboot hint.
+`poweroff` uses ACPI PM1 when available, with emulator port fallbacks.
 
 `config` parses and prints GGUF hyperparameters and reports whether the
 compiled inference path supports the shape. Activation, KV, logits, and

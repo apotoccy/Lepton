@@ -332,6 +332,8 @@ The original goal was 32-bit PCs *and* modern devices.
       table; long merges/words can overflow
 - [ ] No tokenizer byte fallback for out-of-vocabulary UTF-8
 - [x] Ctrl/Alt tracking, Ctrl+Alt+Del reboot, and `reboot` command
+- [x] ACPI `poweroff` command with emulator fallbacks
+- [x] Architecture-aware GGUF config keys and tensor-shape fallbacks
 - [ ] No keyboard LED control (caps lock)
 - [ ] Ring buffer drops input silently on overflow (128 chars max)
 - [ ] `generate`/`genprompt` are fixed at 30 tokens

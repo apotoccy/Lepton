@@ -18,6 +18,14 @@ static inline uint8_t inb(uint16_t port) {
     __asm__ volatile("inb %1, %0" : "=a"(r) : "Nd"(port));
     return r;
 }
+static inline void outw(uint16_t port, uint16_t v) {
+    __asm__ volatile("outw %0, %1" : : "a"(v), "Nd"(port));
+}
+static inline uint16_t inw(uint16_t port) {
+    uint16_t r;
+    __asm__ volatile("inw %1, %0" : "=a"(r) : "Nd"(port));
+    return r;
+}
 
 /* ---------- COM1 serial ---------- */
 #define COM1 0x3F8
@@ -131,6 +139,92 @@ __attribute__((noreturn)) void lp_panic(const char *s) {
 __attribute__((noreturn)) void lp_reboot(void) {
     lp_println("rebooting...");
     outb(0x64, 0xFE);
+    for (;;) __asm__ volatile("cli; hlt");
+}
+
+/* ---- ACPI power off ---------------------------------------------------- */
+static int acpi_sig(const unsigned char *p, const char *sig) {
+    for (int i = 0; i < 4; i++) {
+        if (p[i] != (unsigned char)sig[i]) return 0;
+    }
+    return 1;
+}
+
+static unsigned char *acpi_find_rsdp(void) {
+    unsigned int ebda = (unsigned int)(*(unsigned short *)0x040E) << 4;
+    unsigned int ranges[2][2] = {
+        { ebda, ebda + 1024 },
+        { 0x000E0000, 0x000FFFFF },
+    };
+    for (int r = 0; r < 2; r++) {
+        unsigned int start = ranges[r][0];
+        unsigned int end = ranges[r][1];
+        if (start == 0 || end <= start) continue;
+        for (unsigned int a = start; a + 20 <= end; a += 16) {
+            unsigned char *p = (unsigned char *)a;
+            if (acpi_sig(p, "RSD ") && acpi_sig(p + 4, "PTR ")) {
+                unsigned char sum = 0;
+                for (int i = 0; i < 20; i++) sum = (unsigned char)(sum + p[i]);
+                if (sum == 0) return p;
+            }
+        }
+    }
+    return (unsigned char *)0;
+}
+
+static unsigned char *acpi_find_fadt(void) {
+    unsigned char *rsdp = acpi_find_rsdp();
+    if (!rsdp) return (unsigned char *)0;
+    unsigned int rsdt = *(unsigned int *)(rsdp + 16);
+    unsigned char *p = (unsigned char *)rsdt;
+    if (!acpi_sig(p, "RSDT")) return (unsigned char *)0;
+    unsigned int len = *(unsigned int *)(p + 4);
+    if (len < 36) return (unsigned char *)0;
+    unsigned int n = (len - 36) / 4;
+    for (unsigned int i = 0; i < n; i++) {
+        unsigned int off = *(unsigned int *)(p + 36 + i * 4);
+        unsigned char *t = (unsigned char *)off;
+        if (acpi_sig(t, "FACP")) return t;
+    }
+    return (unsigned char *)0;
+}
+
+__attribute__((noreturn)) void lp_poweroff(void) {
+    lp_println("powering off...");
+    unsigned char *fadt = acpi_find_fadt();
+    if (fadt) {
+        unsigned int len = *(unsigned int *)(fadt + 4);
+        if (len >= 90) {
+            unsigned int pm1a = *(unsigned int *)(fadt + 64);
+            unsigned int pm1b = *(unsigned int *)(fadt + 68);
+            unsigned char slp_typa = fadt[88];
+            unsigned char slp_typb = fadt[89];
+            if (pm1a != 0) {
+                unsigned int val = inw((uint16_t)pm1a);
+                if ((val & 1U) == 0) outw((uint16_t)pm1a, (uint16_t)(val | 1U));
+                outw((uint16_t)pm1a,
+                     (uint16_t)(((unsigned int)slp_typa << 10) | (1U << 13)));
+            }
+            if (pm1b != 0) {
+                unsigned int val = inw((uint16_t)pm1b);
+                if ((val & 1U) == 0) outw((uint16_t)pm1b, (uint16_t)(val | 1U));
+                outw((uint16_t)pm1b,
+                     (uint16_t)(((unsigned int)slp_typb << 10) | (1U << 13)));
+            }
+            /* Try emulator shutdown ports before halting if the firmware
+               did not act on the PM1 write. */
+            outw(0x604, 0x2000);
+            outw(0xB004, 0x2000);
+            outw(0x4004, 0x2000);
+            for (;;) __asm__ volatile("cli; hlt");
+        }
+    }
+
+    /* QEMU/Bochs/VirtualBox ACPI shutdown ports. */
+    outw(0x604, 0x2000);
+    outw(0xB004, 0x2000);
+    outw(0x4004, 0x2000);
+    lp_println("poweroff is not supported by this firmware");
     for (;;) __asm__ volatile("cli; hlt");
 }
 
