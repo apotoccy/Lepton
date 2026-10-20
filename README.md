@@ -11,7 +11,7 @@ as a GRUB ISO.
 
 ## Status (as of October 2026)
 
-- **Compiler:** 110/110 regression tests pass with both the scalar and x86-64
+- **Compiler:** 111/111 regression tests pass with both the scalar and x86-64
   SSE2 targets (`make test`, `make test-sse`), plus 13 IR-verifier and 12
   conversion-policy unit tests.
 - **Build:** 64-bit and 32-bit userland programs build; the freestanding 32-bit
@@ -50,8 +50,9 @@ as a GRUB ISO.
   without a warning.
 - **Control-flow and comparison typing:** `if`/`while` conditions and
   `&&`/`||`/`!` require `bool`. Numeric, bool, enum, same-typed pointer, and
-  string comparisons are supported; struct and array comparisons are rejected
-  with source-located errors. Strings compare by content, not address.
+  string comparisons are supported, plus structural `==`/`!=` for structs and
+  arrays. Aggregate ordering is rejected with source-located errors. Strings
+  compare by content, not address.
 - **Mutable lvalues:** `let` bindings are immutable and `var` is mutable.
   Assignment supports identifiers, fields, indices, vector lanes, nested
   lvalues, and compound operators (`+=`, `-=`, etc.). Pointer pointees remain
@@ -63,6 +64,10 @@ as a GRUB ISO.
   `vcmple`, `vcmpgt`, `vcmpge`, and `vselect` work for every vector type.
   The x86-64 target uses SSE2 for direct comparisons, floating min/max, and
   bitwise lane select; other cases use scalar helpers.
+- **Structural equality:** structs and arrays support recursive `==`/`!=`.
+  Struct fields and array elements compare by value, strings by content,
+  vectors lane-wise, and pointers by address. Floating-point fields use IEEE
+  `==`, so NaNs compare unequal.
 - **Self-contained runtime:** math (`sqrt`, `exp`, `tanh`, `erf`, `cos`, `sin`),
   sampling, GGUF parsing, and print/string helpers are hand-written. Generated
   code does not call libm. Hosted programs use the host C library; the kernel
@@ -164,9 +169,9 @@ make test
 make test-sse
 ```
 
-Expected results: `make test` reports `110 passed, 0 failed`,
+Expected results: `make test` reports `111 passed, 0 failed`,
 `IR verifier: 13 tests passed`, and `Conversion policy: 12 tests passed`;
-`make test-sse` reports `110 passed, 0 failed`.
+`make test-sse` reports `111 passed, 0 failed`.
 
 ### 2. Build and run a userland program
 

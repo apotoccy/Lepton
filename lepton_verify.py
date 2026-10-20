@@ -24,7 +24,8 @@ from lepton_ir import (
     IRTemp, IRLocal, IRConst,
     IRBind, IRAssign, IRBinOp, IRUnOp, IRCall,
     IRConcat, IRToString, IRCast, IRMathOp, IRVecReduce, IRSplat,
-    IRVecBinOp, IRArrayLit, IRArrayIndex, IRArraySet, IRRef, IRAlloc,
+    IRVecBinOp, IRAggregateEq, IRArrayLit, IRArrayIndex, IRArraySet,
+    IRRef, IRAlloc,
     IRStructInit, IRFieldGet, IRFieldSet,
     IRVecLit, IRVecIndex, IRVecSet,
     IRReturn, IRJump, IRCondJump, TERMINATORS,
@@ -366,6 +367,19 @@ class Verifier:
                          instr.pos)
             self.check_assignable(instr.value, target,
                                   f"assignment to '{instr.name}'")
+            return
+
+        if isinstance(instr, IRAggregateEq):
+            self.check_dst(instr, BOOL)
+            self.check_value(instr.left, "aggregate equality left operand")
+            self.check_value(instr.right, "aggregate equality right operand")
+            if instr.left.type != instr.right.type:
+                self.err(f"aggregate equality operands have types "
+                         f"'{ts(instr.left.type)}' and "
+                         f"'{ts(instr.right.type)}'", instr.pos)
+            t = instr.left.type
+            if not (is_array(t) or _is_struct(self.module, t)):
+                self.err(f"aggregate equality on '{ts(t)}'", instr.pos)
             return
 
         if isinstance(instr, IRBinOp):

@@ -180,6 +180,26 @@ class IRCall(IRInstr):
     def replace_operand(self, old, new):
         self.args = [new if a is old else a for a in self.args]
 
+class IRAggregateEq(IRInstr):
+    """dst = structural equality of two same-typed structs or arrays."""
+
+    def __init__(self, dst, left, right, pos=None):
+        super().__init__(pos)
+        self.dst = dst
+        self.left = left
+        self.right = right
+        self.type = ('prim', 'bool')
+
+    def operands(self):
+        return [self.left, self.right]
+
+    def replace_operand(self, old, new):
+        if self.left is old:
+            self.left = new
+        if self.right is old:
+            self.right = new
+
+
 class IRConcat(IRInstr):
     """dst = lp_cat(left, right). Both operands are str-typed."""
     def __init__(self, dst, left, right, pos=None):
@@ -711,6 +731,12 @@ def render_instr(instr):
     if isinstance(instr, IRFieldGet):
         return (f"%{instr.dst.id} = "
                 f"{render_value(instr.base)}.{instr.field}")
+    if isinstance(instr, IRFieldSet):
+        return (f"{render_value(instr.base)}.{instr.field} = "
+                f"{render_value(instr.value)}")
+    if isinstance(instr, IRAggregateEq):
+        return (f"%{instr.dst.id} = aggregate_eq("
+                f"{render_value(instr.left)}, {render_value(instr.right)})")
     if isinstance(instr, IRVecLit):
         elems = ", ".join(render_value(e) for e in instr.elems)
         return f"%{instr.dst.id} = vec[ {elems} ]"

@@ -18,7 +18,8 @@ from lepton_ir import (
     IRModule, IRFunc, IRLocal, IRConst,
     IRBind, IRAssign, IRBinOp, IRUnOp, IRCall,
     IRConcat, IRToString, IRCast, IRMathOp, IRVecReduce, IRSplat,
-    IRVecBinOp, IRArrayLit, IRArrayIndex, IRArraySet, IRRef, IRAlloc,
+    IRVecBinOp, IRAggregateEq, IRArrayLit, IRArrayIndex, IRArraySet,
+    IRRef, IRAlloc,
     IRStructInit, IRFieldGet, IRFieldSet,
     IRVecLit, IRVecIndex, IRVecSet,
     IRReturn, IRJump, IRCondJump, IRNotImplemented,
@@ -711,6 +712,19 @@ class Lowering:
             return
         self.err(f"cannot compare '{ts(lt)}' and '{ts(rt)}'", pos)
 
+    def is_aggregate_type(self, t):
+        return (is_array(t)
+                or (t[0] == 'named' and t[1] in self.module.structs))
+
+    def lower_aggregate_eq(self, l, r, op, pos):
+        eq = self.func.new_temp(('prim', 'bool'))
+        self.block.add(IRAggregateEq(eq, l, r, pos))
+        if op == '==':
+            return eq
+        ne = self.func.new_temp(('prim', 'bool'))
+        self.block.add(IRUnOp(ne, '!', eq, ('prim', 'bool'), pos))
+        return ne
+
     def lower_binop_values(self, l, r, op, pos):
         # Pointer arithmetic: ptr ± int, int + ptr, ptr - ptr.
         if op in ('+', '-') and (l.type[0] == 'ptr' or r.type[0] == 'ptr'):
@@ -722,6 +736,16 @@ class Lowering:
                     self.err(f"cannot compare '{ts(l.type)}' and "
                              f"'{ts(r.type)}'", pos)
                 return self.lower_str_compare(l, r, op, pos)
+            if op in ('==', '!=') and (self.is_aggregate_type(l.type)
+                                       or self.is_aggregate_type(r.type)):
+                if l.type != r.type:
+                    self.err(f"cannot compare '{ts(l.type)}' and "
+                             f"'{ts(r.type)}'", pos)
+                if not (self.is_aggregate_type(l.type)
+                        and self.is_aggregate_type(r.type)):
+                    self.err(f"cannot compare '{ts(l.type)}' and "
+                             f"'{ts(r.type)}'", pos)
+                return self.lower_aggregate_eq(l, r, op, pos)
             self.check_comparable(l, r, op, pos)
             t = ('prim', 'bool')
         else:

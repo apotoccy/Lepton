@@ -4,7 +4,7 @@ Compiler and OS for edge AI inference, from 32-bit PCs to modern devices.
 
 ## Current status (October 2026)
 
-- **Compiler:** single IR pipeline (AST → IR → verify → C11); 110/110 compiler
+- **Compiler:** single IR pipeline (AST → IR → verify → C11); 111/111 compiler
   tests pass on scalar and SSE2, plus 13 IR-verifier and 12 conversion-policy
   unit tests.
 - **OS:** 32-bit Multiboot kernel, GRUB ISO, QEMU boot, and an interactive REPL.
@@ -40,7 +40,7 @@ compiler or standard-library code.
 
 ## 🏆 Major Milestones Achieved
 
-- **Compiler:** single IR pipeline, 110/110 tests passing on scalar and SSE2
+- **Compiler:** single IR pipeline, 111/111 tests passing on scalar and SSE2
   plus 13 IR-verifier and 12 conversion-policy tests, emitting portable C11.
 - **Bare-Metal AI:** a 15M-parameter TinyStories model on a 2008 Lenovo IdeaPad
   S9 (Intel Atom), with no OS, libc, or Python; reproducible in QEMU and as a
@@ -71,12 +71,14 @@ compiler or standard-library code.
       constant-aware exactness, `--strict-types`, and unit tests
 - [x] Bool-only `if`/`while`/logical conditions and unary `!`
 - [x] Comparison rules for numeric, bool, enum, same-typed pointer, and string
-      values; struct/array comparisons rejected
+      values; structural struct/array equality; aggregate ordering rejected
 - [x] Integer-only `for` loop bounds
 - [x] Mutable lvalues: `let` immutability, field/index/nested assignment, and
       compound assignment for identifiers, indices, fields, and vector lanes
 - [x] Vector min/max/comparison/select for all vector types, with SSE2
       comparison/select paths and scalar fallbacks
+- [x] Structural `==`/`!=` for structs and arrays via generated C helpers,
+      including nested fields, strings, vectors, pointers, and NaN semantics
 - [x] Language reference (`docs/LANGUAGE.md`)
 - [x] `pyflakes` step in CI and `pyflakes`-clean compiler modules
 - [ ] Remove the remaining commented AST-emitter code and update docstrings
@@ -355,8 +357,11 @@ The original goal was 32-bit PCs *and* modern devices.
 - **Conditions are bool.** `if`, `while`, `&&`, `||`, and `!` require bool
   operands; numeric or pointer conditions are rejected.
 - **Comparisons are explicit.** Numeric, bool, enum, same-typed pointer, and
-  string comparisons are allowed; struct and array comparisons are rejected.
-  Strings compare by content (`lp_str_eq` / `lp_str_cmp`), not address.
+  string comparisons are allowed, and structs/arrays support structural
+  `==`/`!=`. Aggregate ordering is rejected. Strings compare by content
+  (`lp_str_eq` / `lp_str_cmp`), not address; aggregate equality compares
+  fields/elements recursively, strings by content, vectors lane-wise, and
+  pointers by address, with IEEE float/NaN semantics.
 - **Locals are zero-initialized.** There is no definite-assignment analysis;
   uninitialized declarations read as zero.
 - **`let` is immutable; `var` is mutable.** Parameters are mutable local

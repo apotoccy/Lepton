@@ -235,6 +235,21 @@ LP_VEC_OPS(v8i16, lp_v8i16,  8)
 LP_VEC_OPS(v16i8, lp_v16i8, 16)
 #undef LP_VEC_OPS
 
+/* Whole-vector equality for aggregate comparison helpers. NaN lanes
+   compare unequal, matching scalar float semantics. */
+#define LP_VEC_EQ(NAME, TYPE, COUNT)                                          \
+  static inline bool lp_##NAME##_eq(TYPE a, TYPE b) {                         \
+    for (int i = 0; i < COUNT; i++) if (a.e[i] != b.e[i]) return false;        \
+    return true;                                                              \
+  }
+
+LP_VEC_EQ(v2f64, lp_v2f64,  2)
+LP_VEC_EQ(v4f32, lp_v4f32,  4)
+LP_VEC_EQ(v4i32, lp_v4i32,  4)
+LP_VEC_EQ(v8i16, lp_v8i16,  8)
+LP_VEC_EQ(v16i8, lp_v16i8, 16)
+#undef LP_VEC_EQ
+
 /* Vector reductions. These collapse a vector to a single element of its
    element type. SSE2 has no horizontal-add instruction; AVX2 does. The
    element loop is what GCC and Clang vectorize when they can. */

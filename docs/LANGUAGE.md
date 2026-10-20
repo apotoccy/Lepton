@@ -138,8 +138,8 @@ Operands of `&&`, `||`, and `!` must also be `bool`.
 | Same enum type | all six operators |
 | Same pointer type | all six operators |
 | `str` | all six operators (content-based) |
-| Arrays, structs | rejected |
-| Vectors | rejected; use element access or reductions |
+| Structs, arrays | `==`, `!=` only (structural) |
+| Vectors | rejected; use `vcmpeq`/`vselect` or element access |
 
 Comparing different pointer types requires an explicit cast. To compare a
 pointer with null, cast the null literal to the exact pointer type:
@@ -157,6 +157,28 @@ let a = "alpha";
 if (a == "alpha") { ... }   // true
 if (a < "beta") { ... }     // true
 ```
+
+### Aggregate equality
+
+Structs and arrays support recursive `==`/`!=`, but not ordering:
+
+```lepton
+let a = Point(x: 1, y: 2);
+let b = Point(x: 1, y: 2);
+if (a == b) { ... }          // true
+
+let u: [i32; 3] = {1, 2, 3};
+let v: [i32; 3] = {1, 2, 3};
+if (u == v) { ... }          // true
+```
+
+- Struct equality compares every field.
+- Array equality compares every element.
+- String fields/elements compare by content.
+- Vector fields/elements compare lane by lane.
+- Pointer fields/elements compare addresses.
+- Floating-point fields/elements use IEEE `==`, so NaN is unequal to itself.
+- Ordering (`<`, `<=`, `>`, `>=`) is rejected for structs and arrays.
 
 ## Functions
 
@@ -323,7 +345,7 @@ operator.
 - `raw` blocks parse but are not lowered.
 - Assignment targets are limited to variables, fields, and indices; arbitrary
   expressions such as `(p + 1)[0] = ...` are not accepted.
-- Struct and array comparison are rejected; strings compare by content.
+- Struct and array ordering is rejected; only `==`/`!=` are supported.
 - Untyped array/vector literals still infer a common element type.
 - No `free`, `switch`, generics, closures, or definite-assignment analysis.
 - Freestanding file I/O is declared but not defined.

@@ -11,7 +11,7 @@ from lepton_ir import (
     IRTemp, IRLocal, IRConst,
     IRBind, IRAssign, IRBinOp, IRUnOp, IRCall,
     IRConcat, IRToString, IRCast, IRMathOp, IRVecReduce, IRSplat,
-    IRVecBinOp,
+    IRVecBinOp, IRAggregateEq,
     IRArrayLit, IRArrayIndex, IRArraySet, IRRef, IRAlloc,
     IRStructInit, IRFieldGet, IRFieldSet,
     IRVecLit, IRVecIndex, IRVecSet,
@@ -120,6 +120,7 @@ class CEmitter:
 
         self.emit_type_definitions()
         self.emit()
+        self.emit_eq_helpers()
 
         for name, (params, ret) in self.module.externs.items():
             r = self.resolve(ret) if ret else ('prim', 'void')
@@ -297,6 +298,104 @@ class CEmitter:
                 self.emit("};")
             self.emit()
 
+    def is_eq_aggregate(self, t):
+        return (t is not None
+                and (is_array(t)
+                     or (t[0] == 'named' and t[1] in self.module.structs)))
+
+    def eq_helper_name(self, t):
+        if is_array(t):
+            return "lp_eq_" + array_ctype_name(t[1], t[2])
+        return "lp_eq_" + t[1]
+
+    def eq_expr(self, a, b, t):
+        if self.is_eq_aggregate(t):
+            return f"{self.eq_helper_name(t)}({a}, {b})"
+        if t == ('prim', 'str'):
+            return f"lp_str_eq({a}, {b})"
+        if is_vector(t):
+            return f"lp_{t[1]}_eq({a}, {b})"
+        return f"(({a}) == ({b}))"
+
+    def collect_eq_types(self):
+        seen = set()
+
+        def add(t):
+            if not self.is_eq_aggregate(t) or t in seen:
+                return
+            seen.add(t)
+            if is_array(t):
+                add(t[1])
+            else:
+                for _, ftype in self.module.structs[t[1]]:
+                    add(ftype)
+
+        for f in self.module.funcs:
+            for b in f.blocks:
+                for instr in b.instrs:
+                    if isinstance(instr, IRAggregateEq):
+                        add(instr.left.type)
+        return seen
+
+    def eq_order(self, types):
+        nodes = set(types)
+        edges = {}
+        for t in nodes:
+            deps = []
+            if is_array(t):
+                deps = [t[1]]
+            else:
+                deps = [ft for _, ft in self.module.structs[t[1]]]
+            edges[t] = {d for d in deps if d in nodes}
+
+        order = []
+        state = {}
+
+        def visit(t):
+            mark = state.get(t, 0)
+            if mark == 1:
+                self.err(f"recursive aggregate equality type {t!r}")
+            if mark == 2:
+                return
+            state[t] = 1
+            for dep in sorted(edges[t], key=repr):
+                visit(dep)
+            state[t] = 2
+            order.append(t)
+
+        for t in sorted(nodes, key=repr):
+            visit(t)
+        return order
+
+    def emit_eq_helpers(self):
+        types = self.collect_eq_types()
+        if not types:
+            return
+        for t in self.eq_order(types):
+            name = self.eq_helper_name(t)
+            ct = self.ctype(t)
+            self.emit(f"static bool {name}({ct} a, {ct} b) {{")
+            self.indent += 1
+            if is_array(t):
+                elem = t[1]
+                self.emit(f"for (int i = 0; i < {t[2]}; i++) {{")
+                self.indent += 1
+                self.emit(f"if (!{self.eq_expr('a.e[i]', 'b.e[i]', elem)}) "
+                          f"return false;")
+                self.indent -= 1
+                self.emit("}")
+                self.emit("return true;")
+            else:
+                exprs = [self.eq_expr(f"a.{fname}", f"b.{fname}", ftype)
+                         for fname, ftype in self.module.structs[t[1]]]
+                if exprs:
+                    self.emit("return " + " && ".join(exprs) + ";")
+                else:
+                    self.emit("return true;")
+            self.indent -= 1
+            self.emit("}")
+            self.emit()
+
     def emit_fn(self, f):
         r = self.ret_type(f)
         if f.name == 'main' and not f.params:
@@ -460,6 +559,13 @@ class CEmitter:
             self.emit(f"_t{instr.dst.id} = ({instr.op}{v});")
             return
             
+        if isinstance(instr, IRAggregateEq):
+            name = self.eq_helper_name(instr.left.type)
+            self.emit(f"_t{instr.dst.id} = {name}("
+                      f"{self.emit_value(instr.left)}, "
+                      f"{self.emit_value(instr.right)});")
+            return
+
         if isinstance(instr, IRBinOp):
             a = self.emit_value(instr.left)
             b = self.emit_value(instr.right)
