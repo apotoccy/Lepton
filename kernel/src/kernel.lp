@@ -17,7 +17,8 @@ extern fn lp_argmax(logits: ptr[f32], n: i32) -> u32;
 extern fn lp_sample(logits: ptr[f32], n: i32, temperature: f32, top_k: i32) -> u32;
 extern fn lp_rand_seed(s: u32) -> void;
 extern fn mb_module_end(idx: u32) -> u32;
-extern fn lp_alloc_init(start: ptr[u8], size: i64) -> void;
+extern fn mb_memory_end() -> u32;
+extern fn lp_alloc_init(start: ptr[u8], size: u32) -> void;
 extern fn lp_alloc_bytes(n: i64) -> ptr[u8];
 extern fn lp_reboot() -> void;
 extern fn lp_poweroff() -> void;
@@ -813,12 +814,29 @@ fn main() {
     serial_init();
     vga_init();
 
-    /* Place the heap 1 MB AFTER the loaded model ends */
-    var heap_addr: u32 = 16777216 as u32; /* 16MB fallback */
+    /* Place the heap 1 MB after the loaded model and bound it by the
+       Multiboot memory map. Cap at 64 MB; require at least 8 MB. */
+    var heap_addr: u32 = 16777216 as u32;
     if (mb_module_count() > 0 as u32) {
         heap_addr = mb_module_end(0 as u32) + 1048576 as u32;
     }
-    lp_alloc_init(heap_addr as ptr[u8], 67108864); /* 64 MB of safe RAM */
+    heap_addr = (heap_addr + 4095 as u32) & 0xFFFFF000 as u32;
+    var ram_end = mb_memory_end();
+    if (ram_end == 0 as u32) {
+        ram_end = 134217728 as u32;   /* conservative fallback */
+    }
+    var heap_end = ram_end - 1048576 as u32;   /* reserve 1 MB */
+    if (heap_end <= heap_addr || heap_end - heap_addr < 8388608 as u32) {
+        println("FATAL: not enough RAM for the kernel heap");
+        println("  need at least 8 MB after the loaded module");
+        while (true) { cpu_hlt(); }
+    }
+    var heap_size = heap_end - heap_addr;
+    if (heap_size > 67108864 as u32) {
+        heap_size = 67108864 as u32;   /* 64 MB cap */
+    }
+    lp_alloc_init(heap_addr as ptr[u8], heap_size);
+    println("[0] Heap: {heap_size} bytes at {heap_addr} (RAM end {ram_end})");
 
     println("Lepton OS kernel");
     println("");

@@ -206,8 +206,9 @@ Hardware & Drivers:
 Kernel Features:
 
 - [x] Interactive REPL loop (line accumulation, backspace, Enter)
-- [x] Heap placed after the loaded module with a fixed 64 MB reservation
-- [ ] Multiboot memory-map validation and dynamic heap sizing
+- [x] Multiboot memory-map validation and dynamic heap sizing (64 MB cap,
+      8 MB minimum after the module)
+- [x] Checked `alloc` emission and cleaner `lp_alloc` failure handling
 - [x] Real hardware test (Lenovo IdeaPad S9, 2008 Intel Atom)
 - [x] Context-length guard from GGUF metadata
 - [ ] Config-driven KV/logits/token-table sizing
@@ -323,12 +324,7 @@ The original goal was 32-bit PCs *and* modern devices.
 - [ ] Q4_K/Q5_K/Q6_K and general F32 linear weights are not implemented.
       Inference workspaces are config-sized within a 60 MB budget and a
       256-position context cap.
-- [ ] `lp_alloc` null returns are not checked everywhere; `free` remains a
-      no-op in the bump allocator
-- [ ] `lp_alloc_init` is declared as `(ptr[u8], i64)` in Lepton but defined as
-      `(void *, unsigned long)` in C; fix the ABI mismatch
-- [ ] The heap is a fixed 64 MB reservation after the module, not sized from
-      the Multiboot memory map
+- [ ] `free` remains a no-op in the bump allocator
 - [ ] BPE merge path uses fixed 64-byte piece slots and a 128-entry piece
       table; long merges/words can overflow
 - [ ] No tokenizer byte fallback for out-of-vocabulary UTF-8
@@ -386,8 +382,8 @@ The original goal was 32-bit PCs *and* modern devices.
   back through the parent; this is correct but not yet optimized.
 - **No libm.** All math is self-contained, enabling freestanding kernels.
   Generated code does not call libm; hosted programs use the host C library.
-- **Heap is dynamically initialized after the model.** Currently this is a
-  fixed 64 MB reservation; memory-map validation is pending.
+- **Heap is dynamically initialized after the model.** It is bounded by the
+  Multiboot memory map, capped at 64 MB, and requires at least 8 MB.
 - **The IR is flat.** Locals and temporaries are function-scoped and hoisted.
 - **The IR is verified before C emission.** Type, control-flow, and signature
   invariants are checked after lowering; `--verify-ir` prints a summary.

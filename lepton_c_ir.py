@@ -776,6 +776,8 @@ class CEmitter:
             ct = self.ctype(instr.array_type)
             self.emit(f"_t{instr.dst.id} = "
                       f"({ct}*)lp_alloc(sizeof({ct}));")
+            self.emit(f"if (!_t{instr.dst.id}) "
+                      f"lp_panic(\"out of memory\");")
             return
 
         if isinstance(instr, IRVecLit):

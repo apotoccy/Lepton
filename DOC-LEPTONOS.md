@@ -35,8 +35,9 @@ Lepton OS is a monolithic 32-bit kernel using the **Multiboot 1** specification.
   and enables the x87 FPU and SSE (CR0/CR4) before floating-point code runs.
 - **Model loading.** The GGUF file is passed as a Multiboot module and accessed
   directly from RAM; the kernel does not copy the whole model.
-- **Heap.** A bump heap is initialized after the loaded module. It is a fixed
-  64 MB reservation, not dynamically sized from the Multiboot memory map.
+- **Heap.** A bump heap is initialized after the loaded module. Its range is
+  bounded by the Multiboot memory map, capped at 64 MB, and requires at least
+  8 MB. A low-memory boot prints a fatal message instead of overrunning RAM.
 - **Interrupts.** The PIT runs at 100 Hz and drives ticks and the PRNG. Keyboard
   and serial input are interrupt-driven.
 

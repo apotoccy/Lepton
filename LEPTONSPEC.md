@@ -140,7 +140,8 @@ alloc_release(mark);   // freestanding: rewinds to mark
   invalidate allocations made after the reset point.
 - The kernel marks the heap before each REPL command and releases transient
   allocations afterward; long-lived buffers are allocated before the mark.
-- The kernel reserves a fixed 64 MB heap after the loaded model.
+- The heap is sized from the Multiboot memory map after the loaded model,
+  capped at 64 MB, with an 8 MB minimum.
 
 ## 4. Runtime and standard library
 
@@ -196,8 +197,9 @@ The merge path exists but is untested on TinyStories, which has no merges.
 - Multiboot 1; loads via GRUB or QEMU `-kernel` at 1 MiB.
 - Installs a flat GDT and IDT, remaps the PIC, and enables the x87 FPU and SSE.
 - The GGUF model is a Multiboot module accessed directly from RAM.
-- The bump heap is initialized after the module. It is a fixed 64 MB
-  reservation, not sized from the Multiboot memory map.
+- The bump heap is initialized after the module. Its range comes from the
+  Multiboot memory map, capped at 64 MB, with an 8 MB minimum. Low-memory boot
+  fails with a clear message.
 
 ### 5.2 Drivers
 

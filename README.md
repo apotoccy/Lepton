@@ -335,8 +335,9 @@ These are the boundaries of the current implementation, not a wish list; see
   every live allocation. Each REPL command marks the heap and releases its
   transient allocations afterward, so `vocab`, `encode`, `tensors`, and token
   decoding no longer leak between commands. Long-lived buffers are allocated
-  before the mark. Not every `lp_alloc` result is checked for null, and the heap
-  remains a fixed 64 MB reservation after the loaded module.
+  before the mark. Heap allocation failures are checked, and the heap is
+  bounded by the Multiboot memory map (capped at 64 MB, minimum 8 MB after the
+  loaded module).
 - **Quantization coverage.** Q4_K/Q5_K/Q6_K are not implemented. The kernel's linear layers handle Q4_0/Q8_0 weights plus
   F32 norm tensors; other tensor types are not supported.
 - **Freestanding file I/O.** `lp_file_size`, `lp_read_file_at`, and

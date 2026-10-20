@@ -58,10 +58,10 @@ static unsigned long heap_used = 0;
 static unsigned char *heap_start = 0;
 static unsigned long heap_max = 0;
 
-void lp_alloc_init(void *start, unsigned long size) {
+void lp_alloc_init(void *start, uint32_t size) {
     heap_start = (unsigned char *)start;
     heap_used = 0;
-    heap_max = size;
+    heap_max = (unsigned long)size;
 }
 
 char *lp_alloc(unsigned long n);
@@ -260,6 +260,7 @@ const char *lp_cat(const char *a, const char *b) {
 
 const char *lp_read_str(const void *buf, long long offset, long long n) {
     char *r = lp_alloc((unsigned long)(n + 1));
+    if (!r) return "";
     const unsigned char *p = (const unsigned char *)buf + offset;
     for (long long i = 0; i < n; i++) r[i] = (char)p[i];
     r[n] = 0;
