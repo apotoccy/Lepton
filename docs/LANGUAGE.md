@@ -65,13 +65,51 @@ var counter: i32 = 0;    // mutable
 var zeroed: i32;         // zero-initialized
 ```
 
-- `let` is immutable; `var` is mutable.
+- `let` is immutable; assigning to it is an error. `var` is mutable.
+- Function parameters are mutable local copies.
+- Mutating a pointer's pointee is allowed even when the pointer binding is
+  `let`: `let p = alloc([u8; 4]); p[0] = 1;` is valid, but `p = ...` is not.
 - A declared type is enforced. The initializer is converted to that type.
 - Declarations without an initializer are allowed for any non-`void` type and
   are **zero-initialized**. There is no definite-assignment analysis.
 - Blocks introduce scopes. Shadowing is allowed; the compiler gives each
   binding a unique C name.
 - Top-level `const` values support literals and casts of literals.
+
+## Assignment
+
+```lepton
+var x: i32 = 1;
+x = 2;
+x += 3;                 // compound assignment
+
+var a: [i32; 4] = {1, 2, 3, 4};
+a[0] = 9;
+a[1] += 2;
+
+var p = Point(x: 1, y: 2);
+p.x = 7;
+p.y += 1;               // -> 3
+
+var grid: [[i32; 2]; 2];
+grid[0][0] = 4;         // nested index
+
+let buf = alloc([u8; 8]);
+buf[0] = 1;             // pointer pointee: allowed
+```
+
+Compound operators are `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`,
+and `>>=`. The operation uses the same type rules and conversion checks as the
+corresponding binary operator, then the result is converted back to the target
+type.
+
+Assignment targets may be a variable, a struct field, an array/vector element,
+a pointer element, or a nested combination of these. The base and index
+expressions are evaluated once. Nested aggregate updates use a
+copy-modify-write sequence internally; this is correct but not yet optimized.
+
+An arbitrary expression is not an assignment target: `(p + 1)[0] = ...` is
+rejected.
 
 ## Expressions and operators
 
@@ -183,8 +221,8 @@ Struct initializers use named fields. Missing fields are zero-initialized.
 Structs may contain arrays, nested structs, and pointers, including
 self-referential pointers. Recursive by-value aggregates are rejected.
 
-Field assignment (`p.x = 1`) is not yet lowered; construct a new value or use a
-pointer-based API.
+Fields may be assigned directly (`p.x = 1`) and may be nested
+(`p.inner.x += 1`); see [Assignment](#assignment).
 
 ### Enums
 
@@ -272,9 +310,9 @@ operator.
 
 ## Current gaps
 
-- Compound assignment (`+=`, `-=`, etc.) parses but is not lowered.
 - `raw` blocks parse but are not lowered.
-- Field assignment (`p.x = ...`) is not lowered.
+- Assignment targets are limited to variables, fields, and indices; arbitrary
+  expressions such as `(p + 1)[0] = ...` are not accepted.
 - `str` comparison, struct comparison, and array comparison are rejected.
 - Untyped array/vector literals still infer a common element type.
 - `vcmpeq`, `vcmple`, and `vcmpge` are missing; `vselect` has no SSE2 path.

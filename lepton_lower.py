@@ -19,7 +19,7 @@ from lepton_ir import (
     IRBind, IRAssign, IRBinOp, IRUnOp, IRCall,
     IRConcat, IRToString, IRCast, IRMathOp, IRVecReduce, IRSplat,
     IRVecBinOp, IRArrayLit, IRArrayIndex, IRArraySet, IRRef, IRAlloc,
-    IRStructInit, IRFieldGet,
+    IRStructInit, IRFieldGet, IRFieldSet,
     IRVecLit, IRVecIndex, IRVecSet,
     IRReturn, IRJump, IRCondJump, IRNotImplemented,
 )
@@ -76,6 +76,24 @@ VEC_BIN_OPS = {
     'vselect': ('vselect', 3),
 }
 
+class LValue:
+    """A lowered assignment target.
+
+    `read()` emits/returns the current value; `write(value)` emits a store.
+    `direct_local` means the value is an IRLocal that can be mutated in
+    place without copying and writing back through a parent.
+    """
+
+    def __init__(self, type, read, write, mutable=True,
+                 direct_local=False, desc="value"):
+        self.type = type
+        self.read = read
+        self.write = write
+        self.mutable = mutable
+        self.direct_local = direct_local
+        self.desc = desc
+
+
 class Lowering:
     def __init__(self, items, fname, strict_types=False):
         self.items = items
@@ -88,6 +106,7 @@ class Lowering:
         self.scopes = []
         self.loop_stack = []
         self.declared_names = set()
+        self.mutable_names = set()
         self.rename_counter = 0
         self.current_ret = None
         self.main_implicit_return = False
@@ -213,7 +232,7 @@ class Lowering:
     def pop_scope(self):
         self.scopes.pop()
 
-    def declare(self, name, type):
+    def declare(self, name, type, mutable=True):
         """Declare `name` in the current scope. Returns the C-level name
         (equal to `name` if no shadowing occurred, otherwise `name_N`)."""
         cname = name
@@ -224,6 +243,8 @@ class Lowering:
                 if cname not in self.declared_names:
                     break
         self.declared_names.add(cname)
+        if mutable:
+            self.mutable_names.add(cname)
         self.scopes[-1][name] = (cname, type)
         return cname
 
@@ -239,6 +260,7 @@ class Lowering:
     def lower_fn(self, it, f):
         self.func = f
         self.declared_names = set()
+        self.mutable_names = set()
         self.rename_counter = 0
         self.scopes = [{}]
         self.loop_stack = []
@@ -267,6 +289,7 @@ class Lowering:
             # so a `let` in the body that shadows them gets renamed.
             self.scopes[0][pname] = (pname, ptype)
             self.declared_names.add(pname)
+            self.mutable_names.add(pname)
 
         self.block = f.add_block('entry', it.pos)
         for s in it.body.stmts:
@@ -307,6 +330,141 @@ class Lowering:
                     stack.append(by_label.get(instr.else_target))
                     break
         return seen
+
+    # -- lvalues -------------------------------------------------------------
+    def copy_to_local(self, value, ty, pos):
+        """Copy a value into a fresh local so a nested lvalue can be updated."""
+        name = self.func.new_label("lv")
+        self.block.add(IRBind(name, value, ty, True, pos))
+        return IRLocal(name, ty)
+
+    def require_mutable(self, lv, pos):
+        if not lv.mutable:
+            self.err(f"cannot assign to immutable {lv.desc}", pos)
+
+    def lower_lvalue(self, e, pos):
+        """Lower an assignment target to a read/write LValue.
+
+        Index and field bases are evaluated once. Nested aggregates are
+        copied, updated, and written back through their parent.
+        """
+        if e.kind == 'ident':
+            r = self.lookup(e.name)
+            if r is None:
+                self.err(f"undefined name '{e.name}'", e.pos)
+            cname, ty = r
+            return LValue(
+                ty,
+                lambda: IRLocal(cname, ty),
+                lambda v: self.block.add(IRAssign(cname, v, pos)),
+                cname in self.mutable_names,
+                True,
+                f"'{e.name}'")
+
+        if e.kind == 'field':
+            base = self.lower_lvalue(e.base, e.pos)
+            bt = base.type
+            if bt[0] != 'named' or bt[1] not in self.module.structs:
+                self.err(f"cannot access field '{e.name}' on "
+                         f"'{ts(bt)}'", e.pos)
+            ftype = None
+            for fname, declared in self.module.structs[bt[1]]:
+                if fname == e.name:
+                    ftype = declared
+                    break
+            if ftype is None:
+                self.err(f"struct '{bt[1]}' has no field '{e.name}'", e.pos)
+
+            def read_field():
+                bv = base.read()
+                tmp = self.func.new_temp(ftype)
+                self.block.add(IRFieldGet(tmp, bv, e.name, ftype, e.pos))
+                return tmp
+
+            def write_field(v):
+                bv = base.read()
+                if base.direct_local:
+                    self.block.add(IRFieldSet(bv, e.name, v, e.pos))
+                else:
+                    copy = self.copy_to_local(bv, base.type, e.pos)
+                    self.block.add(IRFieldSet(copy, e.name, v, e.pos))
+                    base.write(copy)
+
+            return LValue(ftype, read_field, write_field, base.mutable,
+                          False, f"field '{e.name}'")
+
+        if e.kind == 'index':
+            if e.base.kind not in ('ident', 'field', 'index'):
+                self.not_impl("IR: indexed assignment target must be a "
+                              "variable, field, or index")
+            base = self.lower_lvalue(e.base, e.pos)
+            idx = self.lower_expr(e.index)
+            if idx is None:
+                self.err("index expression has no value", e.pos)
+            if not is_int(idx.type):
+                self.err(f"index must be an integer, got '{ts(idx.type)}'",
+                         e.pos)
+            bt = base.type
+
+            if bt[0] == 'ptr':
+                elem = self.index_element_type(bt)
+                if elem is None:
+                    self.not_impl(f"IR: indexed assignment to '{ts(bt)}'")
+
+                def read_ptr():
+                    bv = base.read()
+                    tmp = self.func.new_temp(elem)
+                    self.block.add(IRArrayIndex(tmp, bv, idx, elem, e.pos))
+                    return tmp
+
+                def write_ptr(v):
+                    self.block.add(IRArraySet(base.read(), idx, v, e.pos))
+                return LValue(elem, read_ptr, write_ptr, True, False,
+                              "pointer element")
+
+            if is_array(bt):
+                elem = array_elem(bt)
+
+                def read_arr():
+                    bv = base.read()
+                    tmp = self.func.new_temp(elem)
+                    self.block.add(IRArrayIndex(tmp, bv, idx, elem, e.pos))
+                    return tmp
+
+                def write_arr(v):
+                    bv = base.read()
+                    if base.direct_local:
+                        self.block.add(IRArraySet(bv, idx, v, e.pos))
+                    else:
+                        copy = self.copy_to_local(bv, bt, e.pos)
+                        self.block.add(IRArraySet(copy, idx, v, e.pos))
+                        base.write(copy)
+                return LValue(elem, read_arr, write_arr, base.mutable,
+                              False, "array element")
+
+            if is_vector(bt):
+                elem = vector_elem(bt)
+
+                def read_vec():
+                    bv = base.read()
+                    tmp = self.func.new_temp(elem)
+                    self.block.add(IRVecIndex(tmp, bv, idx, elem, e.pos))
+                    return tmp
+
+                def write_vec(v):
+                    bv = base.read()
+                    if base.direct_local:
+                        self.block.add(IRVecSet(bv, idx, v, e.pos))
+                    else:
+                        copy = self.copy_to_local(bv, bt, e.pos)
+                        self.block.add(IRVecSet(copy, idx, v, e.pos))
+                        base.write(copy)
+                return LValue(elem, read_vec, write_vec, base.mutable,
+                              False, "vector element")
+
+            self.not_impl(f"IR: indexed assignment to '{ts(bt)}'")
+
+        self.not_impl(f"IR: assignment target '{e.kind}'")
 
     # -- statements ----------------------------------------------------------
     def lower_stmt(self, s):
@@ -358,7 +516,7 @@ class Lowering:
             if s.value is None:
                 if declared is None:
                     self.err("'let' needs a type or an initialiser", s.pos)
-                cname = self.declare(s.name, declared)
+                cname = self.declare(s.name, declared, s.mutable)
                 self.block.add(IRBind(cname, self.zero_const(declared),
                                       declared, s.mutable, s.pos))
                 return
@@ -367,66 +525,35 @@ class Lowering:
                 v = self.lower_expr(s.value)
                 if v is None:
                     self.err("cannot bind a void expression to a name", s.pos)
-                cname = self.declare(s.name, v.type)
+                cname = self.declare(s.name, v.type, s.mutable)
                 self.block.add(IRBind(cname, v, v.type, s.mutable, s.pos))
                 return
 
             v = self.lower_expr_as(s.value, declared, s.value.pos,
                                    f"initializer for '{s.name}'")
-            cname = self.declare(s.name, declared)
+            cname = self.declare(s.name, declared, s.mutable)
             self.block.add(IRBind(cname, v, declared, s.mutable, s.pos))
             return
 
         if k == 'assign':
-            if s.op != '=':
-                self.not_impl(f"IR: compound assignment '{s.op}'")
+            lv = self.lower_lvalue(s.target, s.pos)
+            self.require_mutable(lv, s.pos)
 
-            if s.target.kind == 'ident':
-                r = self.lookup(s.target.name)
-                if r is None:
-                    self.err(f"undefined name '{s.target.name}'", s.pos)
-                cname, ty = r
-                v = self.lower_expr_as(s.value, ty, s.value.pos,
-                                       f"assignment to '{s.target.name}'")
-                self.block.add(IRAssign(cname, v, s.pos))
+            if s.op == '=':
+                v = self.lower_expr_as(s.value, lv.type, s.value.pos,
+                                       f"assignment to {lv.desc}")
+                lv.write(v)
                 return
 
-            if s.target.kind == 'index':
-                if s.target.base.kind != 'ident':
-                    self.not_impl("IR: nested assignment target")
-                r = self.lookup(s.target.base.name)
-                if r is None:
-                    self.err(f"undefined name '{s.target.base.name}'",
-                             s.pos)
-                base_cname, base_type = r
-                idx = self.lower_expr(s.target.index)
-                if idx is None:
-                    self.err("index expression has no value", s.pos)
-                if not is_int(idx.type):
-                    self.err(f"index must be an integer, "
-                             f"got '{ts(idx.type)}'", s.pos)
-                et = self.index_element_type(base_type)
-                if et is None:
-                    self.not_impl(f"IR: indexed assignment to "
-                                  f"'{ts(base_type)}'")
-                v = self.lower_expr_as(s.value, et, s.value.pos,
-                                       "indexed assignment")
-                base = IRLocal(base_cname, base_type)
-
-                if is_array(base_type):
-                    self.block.add(IRArraySet(base, idx, v, s.pos))
-                    return
-                if base_type[0] == 'ptr' and is_array(base_type[1]):
-                    self.block.add(IRArraySet(base, idx, v, s.pos))
-                    return
-                if base_type[0] == 'ptr' and base_type[1][0] in ('prim', 'ptr', 'named'):
-                    self.block.add(IRArraySet(base, idx, v, s.pos))
-                    return
-                if is_vector(base_type):
-                    self.block.add(IRVecSet(base, idx, v, s.pos))
-                    return
-                self.not_impl(f"IR: indexed assignment to "
-                              f"'{ts(base_type)}'")
+            rhs = self.lower_expr(s.value)
+            if rhs is None:
+                self.err("compound assignment needs a value", s.pos)
+            current = lv.read()
+            result = self.lower_binop_values(current, rhs, s.op[:-1], s.pos)
+            result = self.coerce(result, lv.type, s.value.pos,
+                                 f"compound assignment to {lv.desc}")
+            lv.write(result)
+            return
 
         if k == 'if':
             self.lower_if(s)
@@ -583,6 +710,25 @@ class Lowering:
             return
         self.err(f"cannot compare '{ts(lt)}' and '{ts(rt)}'", pos)
 
+    def lower_binop_values(self, l, r, op, pos):
+        # Pointer arithmetic: ptr ± int, int + ptr, ptr - ptr.
+        if op in ('+', '-') and (l.type[0] == 'ptr' or r.type[0] == 'ptr'):
+            return self.lower_ptr_arith_values(l, r, op, pos)
+
+        if op in ('==', '!=', '<', '<=', '>', '>='):
+            self.check_comparable(l, r, op, pos)
+            t = ('prim', 'bool')
+        else:
+            # Broadcast a scalar operand to match a vector operand.
+            if is_vector(l.type) and not is_vector(r.type):
+                r = self.broadcast(r, l.type, pos)
+            elif is_vector(r.type) and not is_vector(l.type):
+                l = self.broadcast(l, r.type, pos)
+            t = self.common_type(l.type, r.type, pos)
+        dst = self.func.new_temp(t)
+        self.block.add(IRBinOp(dst, op, l, r, t, pos))
+        return dst
+
     def lower_logical(self, e, is_and):
         l = self.lower_expr(e.left)
         if l is None:
@@ -669,7 +815,7 @@ class Lowering:
         self.block.add(IRBind(loop_cname, lo, lo.type, True, s.pos))
 
         end_name = self.func.new_label("end")
-        end_cname = self.declare(end_name, hi.type)
+        end_cname = self.declare(end_name, hi.type, False)
         self.block.add(IRBind(end_cname, hi, hi.type, False, s.pos))
 
         head_lbl = self.func.new_label("head")
@@ -792,24 +938,7 @@ class Lowering:
             r = self.lower_expr(e.right)
             if l is None or r is None:
                 self.err(f"'{e.op}' needs value operands", e.pos)
-
-            # Pointer arithmetic: ptr ± int, int + ptr, ptr - ptr.
-            if e.op in ('+', '-') and (l.type[0] == 'ptr' or r.type[0] == 'ptr'):
-                return self.lower_ptr_arith(e, l, r)
-
-            if e.op in ('==', '!=', '<', '<=', '>', '>='):
-                self.check_comparable(l, r, e.op, e.pos)
-                t = ('prim', 'bool')
-            else:
-                # Broadcast a scalar operand to match a vector operand.
-                if is_vector(l.type) and not is_vector(r.type):
-                    r = self.broadcast(r, l.type, e.pos)
-                elif is_vector(r.type) and not is_vector(l.type):
-                    l = self.broadcast(l, r.type, e.pos)
-                t = self.common_type(l.type, r.type, e.pos)
-            dst = self.func.new_temp(t)
-            self.block.add(IRBinOp(dst, e.op, l, r, t, e.pos))
-            return dst
+            return self.lower_binop_values(l, r, e.op, e.pos)
 
         if k == 'un':
             if e.op == '&':
@@ -1251,44 +1380,42 @@ class Lowering:
 
         self.not_impl(f"IR: indexing '{ts(bt)}' not yet lowered")
 
-    def lower_ptr_arith(self, e, l, r):
+    def lower_ptr_arith_values(self, l, r, op, pos):
         lt = l.type
         rt = r.type
         lp = lt[0] == 'ptr'
         rp = rt[0] == 'ptr'
 
         # ptr - ptr → i64 (element difference)
-        if lp and rp and e.op == '-':
+        if lp and rp and op == '-':
             if lt != rt:
-                self.err(f"cannot subtract '{ts(rt)}' from '{ts(lt)}'",
-                         e.pos)
+                self.err(f"cannot subtract '{ts(rt)}' from '{ts(lt)}'", pos)
             dst = self.func.new_temp(('prim', 'i64'))
-            self.block.add(IRBinOp(dst, '-', l, r, ('prim', 'i64'), e.pos))
+            self.block.add(IRBinOp(dst, '-', l, r, ('prim', 'i64'), pos))
             return dst
 
         # ptr ± int → same ptr type
         if lp and not rp:
             if not is_int(rt):
                 self.err(f"pointer arithmetic needs an integer, "
-                         f"got '{ts(rt)}'", e.pos)
+                         f"got '{ts(rt)}'", pos)
             dst = self.func.new_temp(lt)
-            self.block.add(IRBinOp(dst, e.op, l, r, lt, e.pos))
+            self.block.add(IRBinOp(dst, op, l, r, lt, pos))
             return dst
 
         # int + ptr → same ptr type (commutative; - is not)
         if rp and not lp:
-            if e.op != '+':
-                self.err(f"cannot use '{e.op}' with pointer on the right",
-                         e.pos)
+            if op != '+':
+                self.err(f"cannot use '{op}' with pointer on the right", pos)
             if not is_int(lt):
                 self.err(f"pointer arithmetic needs an integer, "
-                         f"got '{ts(lt)}'", e.pos)
+                         f"got '{ts(lt)}'", pos)
             dst = self.func.new_temp(rt)
-            self.block.add(IRBinOp(dst, '+', l, r, rt, e.pos))
+            self.block.add(IRBinOp(dst, '+', l, r, rt, pos))
             return dst
 
         self.err(f"unsupported pointer arithmetic between "
-                 f"'{ts(lt)}' and '{ts(rt)}'", e.pos)
+                 f"'{ts(lt)}' and '{ts(rt)}'", pos)
 
     def lower_ref(self, e):
         if e.expr.kind != 'ident':

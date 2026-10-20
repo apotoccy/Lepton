@@ -13,7 +13,7 @@ from lepton_ir import (
     IRConcat, IRToString, IRCast, IRMathOp, IRVecReduce, IRSplat,
     IRVecBinOp,
     IRArrayLit, IRArrayIndex, IRArraySet, IRRef, IRAlloc,
-    IRStructInit, IRFieldGet,
+    IRStructInit, IRFieldGet, IRFieldSet,
     IRVecLit, IRVecIndex, IRVecSet,
     IRReturn, IRJump, IRCondJump,
 )
@@ -541,7 +541,12 @@ class CEmitter:
             self.emit(f"_t{instr.dst.id} = "
                       f"({self.emit_value(instr.base)}).{instr.field};")
             return
-                
+
+        if isinstance(instr, IRFieldSet):
+            self.emit(f"({self.emit_value(instr.base)}).{instr.field} = "
+                      f"{self.emit_value(instr.value)};")
+            return
+
         if isinstance(instr, IRMathOp):
             arg = self.emit_value(instr.args[0])
             dst_type = instr.type

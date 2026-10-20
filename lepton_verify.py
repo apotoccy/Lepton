@@ -25,7 +25,7 @@ from lepton_ir import (
     IRBind, IRAssign, IRBinOp, IRUnOp, IRCall,
     IRConcat, IRToString, IRCast, IRMathOp, IRVecReduce, IRSplat,
     IRVecBinOp, IRArrayLit, IRArrayIndex, IRArraySet, IRRef, IRAlloc,
-    IRStructInit, IRFieldGet,
+    IRStructInit, IRFieldGet, IRFieldSet,
     IRVecLit, IRVecIndex, IRVecSet,
     IRReturn, IRJump, IRCondJump, TERMINATORS,
 )
@@ -481,6 +481,18 @@ class Verifier:
             if instr.type != ftype:
                 self.err(f"field '{instr.field}' has type '{ts(ftype)}', "
                          f"instruction says '{ts(instr.type)}'", instr.pos)
+            return
+
+        if isinstance(instr, IRFieldSet):
+            self.check_value(instr.base, "field set base")
+            if not _is_struct(self.module, instr.base.type):
+                self.err(f"field set base has type '{ts(instr.base.type)}', "
+                         f"expected a struct", instr.pos)
+            ftype = _field_type(self.module, instr.base.type[1], instr.field)
+            if ftype is None:
+                self.err(f"struct '{instr.base.type[1]}' has no field "
+                         f"'{instr.field}'", instr.pos)
+            self.check_assignable(instr.value, ftype, "field set value")
             return
 
         if isinstance(instr, IRVecLit):

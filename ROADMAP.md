@@ -4,7 +4,7 @@ Compiler and OS for edge AI inference, from 32-bit PCs to modern devices.
 
 ## Current status (October 2026)
 
-- **Compiler:** single IR pipeline (AST → IR → verify → C11); 102/102 compiler
+- **Compiler:** single IR pipeline (AST → IR → verify → C11); 107/107 compiler
   tests pass on scalar and SSE2, plus 13 IR-verifier and 12 conversion-policy
   unit tests.
 - **OS:** 32-bit Multiboot kernel, GRUB ISO, QEMU boot, and an interactive REPL.
@@ -40,7 +40,7 @@ compiler or standard-library code.
 
 ## 🏆 Major Milestones Achieved
 
-- **Compiler:** single IR pipeline, 102/102 tests passing on scalar and SSE2
+- **Compiler:** single IR pipeline, 107/107 tests passing on scalar and SSE2
   plus 13 IR-verifier and 12 conversion-policy tests, emitting portable C11.
 - **Bare-Metal AI:** a 15M-parameter TinyStories model on a 2008 Lenovo IdeaPad
   S9 (Intel Atom), with no OS, libc, or Python; reproducible in QEMU and as a
@@ -73,6 +73,8 @@ compiler or standard-library code.
 - [x] Comparison rules for numeric, bool, enum, and same-typed pointer values;
       struct/string/array comparisons rejected
 - [x] Integer-only `for` loop bounds
+- [x] Mutable lvalues: `let` immutability, field/index/nested assignment, and
+      compound assignment for identifiers, indices, fields, and vector lanes
 - [x] Language reference (`docs/LANGUAGE.md`)
 - [x] `pyflakes` step in CI and `pyflakes`-clean compiler modules
 - [ ] Remove the remaining commented AST-emitter code and update docstrings
@@ -288,8 +290,9 @@ The original goal was 32-bit PCs *and* modern devices.
       reading an uninitialized `var` is legal
 - [ ] Untyped array/vector literals still infer a common element type; two
       differently typed array variables cannot be converted element-wise
-- [ ] Compound assignment (`+=`, `-=`, etc.) parses but is not lowered
 - [ ] `raw` blocks parse but are not lowered
+- [ ] Lvalue bases are limited to variables, fields, and indices; arbitrary
+      expressions such as `(p + 1)[0] = ...` are not assignment targets
 - [ ] `vcmpeq`, `vcmple`, `vcmpge` are missing; `vselect` has no SSE2 intrinsic
       path
 - [ ] Vector min/max/comparison helpers are only emitted for `v4f32`, even
@@ -357,6 +360,12 @@ The original goal was 32-bit PCs *and* modern devices.
   comparisons are allowed; struct, string, and array comparisons are rejected.
 - **Locals are zero-initialized.** There is no definite-assignment analysis;
   uninitialized declarations read as zero.
+- **`let` is immutable; `var` is mutable.** Parameters are mutable local
+  copies. Mutating a pointer's pointee is allowed even when the pointer
+  binding is `let`.
+- **Nested lvalues copy-modify-write.** Updating a field or element inside an
+  aggregate copies the aggregate to a temporary, updates it, and writes it
+  back through the parent; this is correct but not yet optimized.
 - **No libm.** All math is self-contained, enabling freestanding kernels.
   Generated code does not call libm; hosted programs use the host C library.
 - **Heap is dynamically initialized after the model.** Currently this is a

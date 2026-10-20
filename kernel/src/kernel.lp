@@ -1177,7 +1177,7 @@ fn main() {
                     if (mb_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
-                        let a = parse_int_at(text, 5);
+                        var a = parse_int_at(text, 5);
                         let a_end = parse_int_end(text, 5);
                         var b = parse_int_at(text, a_end);
                         if (b < a) { b = a; }

@@ -497,6 +497,26 @@ class IRFieldGet(IRInstr):
         if self.base is old:
             self.base = new
 
+
+class IRFieldSet(IRInstr):
+    """base.field = value. A statement: no destination."""
+
+    def __init__(self, base, field, value, pos=None):
+        super().__init__(pos)
+        self.base = base
+        self.field = field
+        self.value = value
+
+    def operands(self):
+        return [self.base, self.value]
+
+    def replace_operand(self, old, new):
+        if self.base is old:
+            self.base = new
+        if self.value is old:
+            self.value = new
+
+
 class IRReturn(IRInstr):
     """Return from the current function. `value` is None for void returns."""
 

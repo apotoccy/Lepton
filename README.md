@@ -11,7 +11,7 @@ as a GRUB ISO.
 
 ## Status (as of October 2026)
 
-- **Compiler:** 102/102 regression tests pass with both the scalar and x86-64
+- **Compiler:** 107/107 regression tests pass with both the scalar and x86-64
   SSE2 targets (`make test`, `make test-sse`), plus 13 IR-verifier and 12
   conversion-policy unit tests.
 - **Build:** 64-bit and 32-bit userland programs build; the freestanding 32-bit
@@ -52,6 +52,10 @@ as a GRUB ISO.
   `&&`/`||`/`!` require `bool`. Numeric, bool, enum, and same-typed pointer
   comparisons are supported; struct, string, and array comparisons are rejected
   with source-located errors.
+- **Mutable lvalues:** `let` bindings are immutable and `var` is mutable.
+  Assignment supports identifiers, fields, indices, vector lanes, nested
+  lvalues, and compound operators (`+=`, `-=`, etc.). Pointer pointees remain
+  mutable through an immutable pointer binding.
 - **Hardware-oriented numerics:** `f16`, `bf16`, fixed-point `q7`/`q15`/`q31`,
   and SIMD vectors (`v2f64`, `v4f32`, `v4i32`, `v8i16`, `v16i8`). `f16`/`bf16`
   use native compiler types where available and portable fallbacks otherwise.
@@ -158,9 +162,9 @@ make test
 make test-sse
 ```
 
-Expected results: `make test` reports `102 passed, 0 failed`,
+Expected results: `make test` reports `107 passed, 0 failed`,
 `IR verifier: 13 tests passed`, and `Conversion policy: 12 tests passed`;
-`make test-sse` reports `102 passed, 0 failed`.
+`make test-sse` reports `107 passed, 0 failed`.
 
 ### 2. Build and run a userland program
 
@@ -277,9 +281,10 @@ These are the boundaries of the current implementation, not a wish list; see
 - **Tokenizer edge cases.** The BPE merges path exists but is untested on this
   model (TinyStories has no merges), its fixed piece buffers need bounds work,
   and byte-fallback handling is missing.
-- **Compiler gaps.** Compound assignment (`+=`, etc.) parses but is not lowered;
-  `raw` blocks parse but are not lowered; `vcmpeq`/`vcmple`/`vcmpge` and an SSE2
-  `vselect` are missing.
+- **Compiler gaps.** `raw` blocks parse but are not lowered;
+  `vcmpeq`/`vcmple`/`vcmpge` and an SSE2 `vselect` are missing. Assignment
+  targets must be a variable, field, or index; an arbitrary expression such as
+  `(p + 1)[0] = ...` is not accepted as an lvalue.
 - **One backend.** Only scalar and x86-64 SSE2 are implemented. There is no
   AVX2, NEON/ARM, LLVM IR, or WASM backend yet.
 
