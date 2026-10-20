@@ -27,7 +27,7 @@ from lepton_ir import (
 )
 
 from leptonc import CompileError, CompileWarning
-from lepton_types import (is_num, RANK, PRIMS, ts,
+from lepton_types import (is_num, is_int, RANK, PRIMS, ts,
                           is_vector, vector_elem, vector_len, vector_of,
                           is_array, array_elem, array_len,
                           is_lossy_conversion, pointer_view_is_safe,
@@ -113,6 +113,7 @@ class Lowering:
         self.block = None
         self.scopes = []
         self.loop_stack = []
+        self.break_stack = []
         self.declared_names = set()
         self.mutable_names = set()
         self.rename_counter = 0
@@ -272,6 +273,7 @@ class Lowering:
         self.rename_counter = 0
         self.scopes = [{}]
         self.loop_stack = []
+        self.break_stack = []
 
         if f.ret is not None:
             f.ret = self.resolve_type(f.ret, it.pos)
@@ -567,6 +569,10 @@ class Lowering:
             self.lower_if(s)
             return
 
+        if k == 'switch':
+            self.lower_switch(s)
+            return
+
         if k == 'while':
             self.lower_while(s)
             return
@@ -577,10 +583,9 @@ class Lowering:
             return
 
         if k == 'break':
-            if not self.loop_stack:
-                self.err("'break' outside a loop", s.pos)
-            _, end_lbl = self.loop_stack[-1]
-            self.block.add(IRJump(end_lbl, s.pos))
+            if not self.break_stack:
+                self.err("'break' outside a loop or switch", s.pos)
+            self.block.add(IRJump(self.break_stack[-1], s.pos))
             return
 
         if k == 'continue':
@@ -825,6 +830,123 @@ class Lowering:
         self.block = self.func.add_block(merge_lbl, e.pos)
         return IRLocal(dst_name, ('prim', 'bool'))
     
+    def eval_case_const(self, e, target):
+        if target[0] == 'named':
+            if target[1] not in self.module.enums:
+                self.err(f"switch case type '{ts(target)}' is not an enum", e.pos)
+            if e.kind == 'field' and e.base.kind == 'ident':
+                if e.base.name != target[1]:
+                    self.err(f"case enum '{e.base.name}' does not match "
+                             f"switch type '{ts(target)}'", e.pos)
+                variants = self.module.enums[target[1]]
+                if e.name not in variants:
+                    self.err(f"enum '{target[1]}' has no variant '{e.name}'",
+                             e.pos)
+                return IRConst(f"{target[1]}_{e.name}", target)
+            if e.kind == 'ident' and e.name in self.module.globals:
+                _, ty, val = self.module.globals[e.name]
+                if ty == target:
+                    return val
+            self.err(f"case value must be an enum variant of "
+                     f"'{target[1]}'", e.pos)
+
+        if not is_int(target):
+            self.err(f"switch cases must be integer or enum values, "
+                     f"got '{ts(target)}'", e.pos)
+
+        if e.kind in ('int', 'charlit'):
+            src = ('prim', 'i32') if e.kind == 'int' else ('prim', 'char')
+            if not constant_conversion_is_exact(e.value, src, target):
+                self.err(f"case value {e.value} does not fit in "
+                         f"'{ts(target)}'", e.pos)
+            return IRConst(e.value, target)
+
+        if e.kind == 'unop' and e.op in ('-', '+', '~'):
+            inner = self.eval_case_const(e.expr, target)
+            if e.op == '-':
+                val = -inner.value
+            elif e.op == '+':
+                val = +inner.value
+            else:
+                val = ~inner.value
+            if not constant_conversion_is_exact(val, ('prim', 'i64'), target):
+                self.err(f"case value {val} does not fit in "
+                         f"'{ts(target)}'", e.pos)
+            return IRConst(val, target)
+
+        if e.kind == 'ident' and e.name in self.module.globals:
+            _, ty, val = self.module.globals[e.name]
+            if ty == target:
+                return val
+            if is_int(ty) and is_int(target) and \
+                    constant_conversion_is_exact(val.value, ty, target):
+                return IRConst(val.value, target)
+
+        self.err("case value must be an integer literal, a constant, or "
+                 "an enum variant", e.pos)
+
+    def lower_switch(self, s):
+        value = self.lower_expr(s.value)
+        if value is None:
+            self.err("switch value has no value", s.pos)
+        vt = value.type
+        is_enum = vt[0] == 'named' and vt[1] in self.module.enums
+        if not (is_int(vt) or is_enum):
+            self.err(f"switch value must be an integer or enum, got "
+                     f"'{ts(vt)}'", s.pos)
+
+        entries = []
+        seen = set()
+        for case in s.cases:
+            vals = []
+            for expr in case.values:
+                cv = self.eval_case_const(expr, vt)
+                key = cv.value
+                if key in seen:
+                    self.err(f"duplicate case value {key!r}", expr.pos)
+                seen.add(key)
+                vals.append(cv)
+            entries.append((case, vals))
+
+        end_lbl = self.func.new_label("switch_end")
+        default_lbl = (self.func.new_label("switch_default")
+                       if s.default is not None else end_lbl)
+
+        checks = []
+        bodies = []
+        for case, vals in entries:
+            case_lbl = self.func.new_label("switch_case")
+            for cv in vals:
+                checks.append((cv, case_lbl))
+            bodies.append((case_lbl, case.body))
+
+        for cv, case_lbl in checks:
+            next_lbl = self.func.new_label("switch_next")
+            cond = self.func.new_temp(('prim', 'bool'))
+            self.block.add(IRBinOp(cond, '==', value, cv,
+                                   ('prim', 'bool'), s.pos))
+            self.block.add(IRCondJump(cond, case_lbl, next_lbl, s.pos))
+            self.block = self.func.add_block(next_lbl, s.pos)
+        self.block.add(IRJump(default_lbl, s.pos))
+
+        for case_lbl, body in bodies:
+            self.block = self.func.add_block(case_lbl, s.pos)
+            self.break_stack.append(end_lbl)
+            self.lower_stmt(body)
+            self.break_stack.pop()
+            if not self.block.is_terminated():
+                self.block.add(IRJump(end_lbl, s.pos))
+
+        if s.default is not None:
+            self.block = self.func.add_block(default_lbl, s.pos)
+            self.break_stack.append(end_lbl)
+            self.lower_stmt(s.default)
+            self.break_stack.pop()
+            if not self.block.is_terminated():
+                self.block.add(IRJump(end_lbl, s.pos))
+
+        self.block = self.func.add_block(end_lbl, s.pos)
+
     def lower_if(self, s):
         cond = self.lower_condition(s.cond, "if")
 
@@ -888,7 +1010,9 @@ class Lowering:
 
         self.block = self.func.add_block(body_lbl, s.pos)
         self.loop_stack.append((step_lbl, end_lbl))
+        self.break_stack.append(end_lbl)
         self.lower_stmt(s.body)
+        self.break_stack.pop()
         self.loop_stack.pop()
         if not self.block.is_terminated():
             self.block.add(IRJump(step_lbl, s.pos))
@@ -919,7 +1043,9 @@ class Lowering:
 
         self.block = self.func.add_block(body_lbl, s.pos)
         self.loop_stack.append((head_lbl, end_lbl))
+        self.break_stack.append(end_lbl)
         self.lower_stmt(s.body)
+        self.break_stack.pop()
         self.loop_stack.pop()
         if not self.block.is_terminated():
             self.block.add(IRJump(head_lbl, s.pos))
@@ -1663,11 +1789,6 @@ class Lowering:
         if is_num(a) and is_num(b):
             return ('prim', a[1] if RANK[a[1]] >= RANK[b[1]] else b[1])
         self.err(f"incompatible types '{a}' and '{b}'", pos)        
-
-
-def is_int(t):
-    from lepton_types import is_int as _is_int
-    return _is_int(t)
 
 
 def lower_module(items, fname, strict_types=False):

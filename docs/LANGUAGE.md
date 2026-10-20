@@ -352,8 +352,24 @@ for i in 0..10 { ... }     // 0 .. 9
 for i in 0..=10 { ... }    // 0 .. 10
 ```
 
-`for` bounds must be integers. There is no `switch`, `do`/`while`, or ternary
-operator.
+`for` bounds must be integers.
+
+### switch
+
+```lepton
+switch (x) {
+    case 0, 1 { ... }
+    case 2 { ... }
+    default { ... }
+}
+```
+
+`switch` works on integers, `char`, and enums. Cases take one or more constant
+values; enum cases use `Color.Red`. There is no implicit fallthrough: each case
+body ends at the switch merge, and `break` exits the switch (including from
+inside a loop). `continue` still applies to the enclosing loop.
+
+There is no `do`/`while` or ternary operator.
 
 ## Compiler options
 
@@ -375,6 +391,6 @@ operator.
   expressions such as `(p + 1)[0] = ...` are not accepted.
 - Struct and array ordering is rejected; only `==`/`!=` are supported.
 - Untyped array/vector literals still infer a common element type.
-- No `switch`, generics, closures, or definite-assignment analysis.
+- No generics, closures, or definite-assignment analysis.
 - Freestanding `free` is a no-op; `alloc_reset` reclaims the whole bump heap.
 - Freestanding file I/O is declared but not defined.

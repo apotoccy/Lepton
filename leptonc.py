@@ -50,6 +50,7 @@ class CompileWarning:
 # =============================================================================
 KEYWORDS = {
     'fn', 'let', 'var', 'const', 'if', 'else', 'while', 'for', 'in',
+    'switch', 'case', 'default',
     'return', 'break', 'continue', 'struct', 'enum', 'raw', 'extern',
     'as', 'true', 'false', 'void', 'import', 'alloc',
 }
@@ -498,6 +499,42 @@ class Parser:
                 body = self.parse_block()
                 return Node('for', pos=start, var=var, lo=lo, hi=hi,
                             inclusive=inclusive, body=body)
+
+            if w == 'switch':
+                self.next()
+                self.expect('op', '(')
+                value = self.parse_expr()
+                self.expect('op', ')')
+                self.expect('op', '{')
+                cases = []
+                default = None
+                while not self.at_op('}'):
+                    if self.at_kw('case'):
+                        c = self.peek()
+                        cpos = (c[2], c[3])
+                        self.next()
+                        vals = [self.parse_expr()]
+                        while self.eat('op', ','):
+                            if self.at_op('{'):
+                                break
+                            vals.append(self.parse_expr())
+                        body = self.parse_block()
+                        cases.append(Node('case', pos=cpos, values=vals,
+                                          body=body))
+                    elif self.at_kw('default'):
+                        d = self.peek()
+                        dpos = (d[2], d[3])
+                        self.next()
+                        if default is not None:
+                            self.err("duplicate 'default' in switch", dpos)
+                        default = self.parse_block()
+                    else:
+                        t = self.peek()
+                        self.err(f"expected 'case' or 'default' in switch, "
+                                 f"found {t[1]!r}", (t[2], t[3]))
+                self.expect('op', '}')
+                return Node('switch', pos=start, value=value, cases=cases,
+                            default=default)
 
             if w == 'return':
                 self.next()

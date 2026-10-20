@@ -12,7 +12,7 @@ the full conversion policy and current gaps, is
 
 ## Current status
 
-- **117/117** compiler regression tests on scalar and x86-64 SSE2.
+- **121/121** compiler regression tests on scalar and x86-64 SSE2.
 - 13 IR-verifier tests and 12 conversion-policy tests.
 - 64-bit and 32-bit userland builds, freestanding 32-bit kernel, and GRUB ISO.
 - `let` immutability, compound assignment, field/index/nested lvalues.
@@ -166,10 +166,19 @@ while (i < 5) {
 
 for j in 0..5 { ... }     // 0, 1, 2, 3, 4
 for j in 1..=5 { ... }    // 1, 2, 3, 4, 5
+
+switch (x) {
+    case 0, 1 { ... }
+    case 2 { ... }
+    default { ... }
+}
 ```
 
-`break` and `continue` are supported. `for` bounds must be integers. There is
-no `switch`, `do`/`while`, or ternary operator yet.
+`break` and `continue` are supported. `for` bounds must be integers. `switch`
+works on integers, `char`, and enums; cases take constant values and there is
+no implicit fallthrough. `break` exits the switch, while `continue` still
+applies to the enclosing loop. There is no `do`/`while` or ternary operator
+yet.
 
 ## 7. Functions and modules
 
@@ -381,7 +390,7 @@ scalar target uses portable loops; the x86-64 target adds SSE2 paths.
 
 ## 14. Current gaps
 
-- `raw` blocks and `switch` are not implemented.
+- `raw` blocks are not implemented.
 - Assignment targets are limited to variables, fields, and indices;
   `(p + 1)[0] = ...` is rejected.
 - Struct and array ordering (`<`, `<=`, `>`, `>=`) is rejected; equality works.

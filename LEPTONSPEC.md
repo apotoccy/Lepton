@@ -13,7 +13,7 @@ freestanding 32-bit kernel code.
 
 Current status:
 
-- **117/117** compiler tests on scalar and x86-64 SSE2.
+- **121/121** compiler tests on scalar and x86-64 SSE2.
 - 13 IR-verifier tests and 12 conversion-policy tests.
 - TinyStories-15M boots and runs in QEMU and on a 2008-era Lenovo IdeaPad S9.
 - `fwdpos 0 1` predicts token **9038** (`Once`), matching the Python reference.
@@ -95,13 +95,15 @@ p.inner.x += 1;
 ### 3.3 Control flow and comparisons
 
 - `if`/`else`, `while`, and range-based `for` (`..`, `..=`).
-- `break` and `continue`.
+- `switch` on integers, `char`, and enums, with multi-value cases and
+  `default`; no implicit fallthrough.
+- `break` and `continue`; `break` exits the nearest loop or switch.
 - Conditions and `&&`/`||`/`!` operands must be `bool`.
 - Numeric, bool, enum, and same-typed pointer comparisons.
 - Content-based string equality and ordering.
 - Structural `==`/`!=` for structs and arrays.
 - Aggregate ordering is rejected.
-- No `switch`, `do`/`while`, or ternary operator.
+- No `do`/`while` or ternary operator.
 
 ### 3.4 Aggregates and conversions
 
@@ -237,8 +239,8 @@ ISO to a device and requires `sudo`; verify the device name first.
 - **Memory.** The bump allocator cannot reclaim individual blocks.
   `alloc_reset` invalidates all live allocations; per-command reset boundaries
   and null checks for `lp_alloc` are incomplete.
-- **Compiler gaps.** No `switch`, `raw` blocks, generics, closures, or
-  definite-assignment analysis. Lvalue bases are limited to variables, fields,
+- **Compiler gaps.** No `raw` blocks, generics, closures, or definite-assignment
+  analysis. Lvalue bases are limited to variables, fields,
   and indices.
 - **File I/O.** Freestanding file I/O is declared but not defined; the kernel
   has no filesystem driver.
