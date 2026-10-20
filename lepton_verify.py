@@ -122,6 +122,8 @@ RUNTIME_CALLS = {
     'lp_read_file_at': ([STR, I64, ANY_PTR, I64], I64),
     'lp_write_file': ([STR, ANY_PTR, I64], I64),
     'lp_read_str': ([ANY_PTR, I64, I64], STR),
+    'lp_str_eq':   ([STR, STR], BOOL),
+    'lp_str_cmp':  ([STR, STR], I32),
     'lp_rd_u8':    ([ANY_PTR, I64], ('prim', 'u8')),
     'lp_rd_u16_le': ([ANY_PTR, I64], ('prim', 'u16')),
     'lp_rd_u32_le': ([ANY_PTR, I64], ('prim', 'u32')),

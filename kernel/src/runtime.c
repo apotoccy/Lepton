@@ -119,6 +119,23 @@ const char *lp_read_str(const void *buf, long long offset, long long n) {
     return r;
 }
 
+/* Content-based string comparison. Null compares equal to null and sorts
+   before any non-null string. */
+int lp_str_eq(const char *a, const char *b) {
+    if (a == b) return 1;
+    if (!a || !b) return 0;
+    while (*a && *b && *a == *b) { a++; b++; }
+    return *a == *b;
+}
+
+int lp_str_cmp(const char *a, const char *b) {
+    if (a == b) return 0;
+    if (!a) return -1;
+    if (!b) return 1;
+    while (*a && *b && *a == *b) { a++; b++; }
+    return (unsigned char)*a - (unsigned char)*b;
+}
+
 const char *lp_str_i64(long long v) {
     static char bufs[4][24];
     static int  idx = 0;

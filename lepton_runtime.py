@@ -464,6 +464,23 @@ static LP_UNUSED const char *lp_read_str(const void *buf, int64_t offset,
     return r;
 }
 
+/* Content-based string comparison. Null compares equal to null and sorts
+   before any non-null string. */
+static LP_UNUSED bool lp_str_eq(const char *a, const char *b) {
+    if (a == b) return true;
+    if (!a || !b) return false;
+    while (*a && *b && *a == *b) { a++; b++; }
+    return *a == *b;
+}
+
+static LP_UNUSED int32_t lp_str_cmp(const char *a, const char *b) {
+    if (a == b) return 0;
+    if (!a) return -1;
+    if (!b) return 1;
+    while (*a && *b && *a == *b) { a++; b++; }
+    return (int32_t)((unsigned char)*a - (unsigned char)*b);
+}
+
 '''
 
 
@@ -785,6 +802,8 @@ extern int64_t     lp_read_file_at(const char *path, int64_t offset,
                                    void *buf, int64_t n);
 extern int64_t     lp_write_file(const char *path, const void *buf, int64_t n);
 extern const char *lp_read_str(const void *buf, int64_t offset, int64_t n);
+extern int         lp_str_eq(const char *a, const char *b);
+extern int32_t     lp_str_cmp(const char *a, const char *b);
 '''
 
 

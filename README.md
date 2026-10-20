@@ -11,7 +11,7 @@ as a GRUB ISO.
 
 ## Status (as of October 2026)
 
-- **Compiler:** 107/107 regression tests pass with both the scalar and x86-64
+- **Compiler:** 108/108 regression tests pass with both the scalar and x86-64
   SSE2 targets (`make test`, `make test-sse`), plus 13 IR-verifier and 12
   conversion-policy unit tests.
 - **Build:** 64-bit and 32-bit userland programs build; the freestanding 32-bit
@@ -49,9 +49,9 @@ as a GRUB ISO.
   Integer-to-float conversions and byte/void pointer views are permitted
   without a warning.
 - **Control-flow and comparison typing:** `if`/`while` conditions and
-  `&&`/`||`/`!` require `bool`. Numeric, bool, enum, and same-typed pointer
-  comparisons are supported; struct, string, and array comparisons are rejected
-  with source-located errors.
+  `&&`/`||`/`!` require `bool`. Numeric, bool, enum, same-typed pointer, and
+  string comparisons are supported; struct and array comparisons are rejected
+  with source-located errors. Strings compare by content, not address.
 - **Mutable lvalues:** `let` bindings are immutable and `var` is mutable.
   Assignment supports identifiers, fields, indices, vector lanes, nested
   lvalues, and compound operators (`+=`, `-=`, etc.). Pointer pointees remain
@@ -162,9 +162,9 @@ make test
 make test-sse
 ```
 
-Expected results: `make test` reports `107 passed, 0 failed`,
+Expected results: `make test` reports `108 passed, 0 failed`,
 `IR verifier: 13 tests passed`, and `Conversion policy: 12 tests passed`;
-`make test-sse` reports `107 passed, 0 failed`.
+`make test-sse` reports `108 passed, 0 failed`.
 
 ### 2. Build and run a userland program
 

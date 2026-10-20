@@ -683,9 +683,6 @@ class Lowering:
                      "or a reduction", pos)
         if is_array(lt) or is_array(rt):
             self.err(f"cannot compare arrays '{ts(lt)}' and '{ts(rt)}'", pos)
-        if lt == ('prim', 'str') or rt == ('prim', 'str'):
-            self.err("string comparison is not supported; compare characters "
-                     "or lengths explicitly", pos)
         if lt == ('prim', 'bool') or rt == ('prim', 'bool'):
             if lt != rt:
                 self.err(f"cannot compare '{ts(lt)}' and '{ts(rt)}'", pos)
@@ -716,6 +713,11 @@ class Lowering:
             return self.lower_ptr_arith_values(l, r, op, pos)
 
         if op in ('==', '!=', '<', '<=', '>', '>='):
+            if l.type == ('prim', 'str') or r.type == ('prim', 'str'):
+                if l.type != ('prim', 'str') or r.type != ('prim', 'str'):
+                    self.err(f"cannot compare '{ts(l.type)}' and "
+                             f"'{ts(r.type)}'", pos)
+                return self.lower_str_compare(l, r, op, pos)
             self.check_comparable(l, r, op, pos)
             t = ('prim', 'bool')
         else:
@@ -727,6 +729,25 @@ class Lowering:
             t = self.common_type(l.type, r.type, pos)
         dst = self.func.new_temp(t)
         self.block.add(IRBinOp(dst, op, l, r, t, pos))
+        return dst
+
+    def lower_str_compare(self, l, r, op, pos):
+        if op in ('==', '!='):
+            eq = self.func.new_temp(('prim', 'bool'))
+            self.block.add(IRCall(eq, 'lp_str_eq', [l, r],
+                                  ('prim', 'bool'), pos))
+            if op == '==':
+                return eq
+            ne = self.func.new_temp(('prim', 'bool'))
+            self.block.add(IRUnOp(ne, '!', eq, ('prim', 'bool'), pos))
+            return ne
+
+        cmp = self.func.new_temp(('prim', 'i32'))
+        self.block.add(IRCall(cmp, 'lp_str_cmp', [l, r],
+                              ('prim', 'i32'), pos))
+        zero = IRConst(0, ('prim', 'i32'))
+        dst = self.func.new_temp(('prim', 'bool'))
+        self.block.add(IRBinOp(dst, op, cmp, zero, ('prim', 'bool'), pos))
         return dst
 
     def lower_logical(self, e, is_and):

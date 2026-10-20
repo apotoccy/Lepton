@@ -1,5 +1,5 @@
 fn main() {
-    if ("a" == "b") {
+    if ("a" == 1) {
         println("same");
     }
 }

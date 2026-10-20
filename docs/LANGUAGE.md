@@ -137,7 +137,8 @@ Operands of `&&`, `||`, and `!` must also be `bool`.
 | `bool` | `==`, `!=` only |
 | Same enum type | all six operators |
 | Same pointer type | all six operators |
-| `str`, arrays, structs | rejected |
+| `str` | all six operators (content-based) |
+| Arrays, structs | rejected |
 | Vectors | rejected; use element access or reductions |
 
 Comparing different pointer types requires an explicit cast. To compare a
@@ -147,8 +148,15 @@ pointer with null, cast the null literal to the exact pointer type:
 if (p != 0 as ptr[[u8; 4]]) { ... }
 ```
 
-String comparison is intentionally rejected: `str` equality would compare
-addresses rather than contents. Compare characters or lengths explicitly.
+String equality compares contents, not addresses. Ordering is lexicographic by
+unsigned byte value. Null strings compare equal to each other and sort before
+non-null strings:
+
+```lepton
+let a = "alpha";
+if (a == "alpha") { ... }   // true
+if (a < "beta") { ... }     // true
+```
 
 ## Functions
 
@@ -313,7 +321,7 @@ operator.
 - `raw` blocks parse but are not lowered.
 - Assignment targets are limited to variables, fields, and indices; arbitrary
   expressions such as `(p + 1)[0] = ...` are not accepted.
-- `str` comparison, struct comparison, and array comparison are rejected.
+- Struct and array comparison are rejected; strings compare by content.
 - Untyped array/vector literals still infer a common element type.
 - `vcmpeq`, `vcmple`, and `vcmpge` are missing; `vselect` has no SSE2 path.
 - No `free`, `switch`, generics, closures, or definite-assignment analysis.

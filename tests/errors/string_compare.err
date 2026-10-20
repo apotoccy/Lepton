@@ -1,1 +1,1 @@
-string comparison is not supported
+cannot compare 'str' and 'i32'
