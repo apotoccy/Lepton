@@ -14,7 +14,7 @@ see [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
-- Compiler: **124/124** regression tests on scalar and x86-64 SSE2, plus 13
+- Compiler: **127/127** regression tests on scalar and x86-64 SSE2, plus 13
   IR-verifier tests and 12 conversion-policy tests.
 - Build: 64-bit and 32-bit userland programs, the freestanding 32-bit kernel,
   and the GRUB ISO all build.
@@ -157,7 +157,7 @@ with GRUB installed and `kernel.elf` plus the model in `/boot` also works.
   boundary; not every `lp_alloc` result is null-checked.
 - **File I/O.** Freestanding file I/O symbols are declared but not defined; the
   kernel has no filesystem driver.
-- **Compiler gaps.** Assignment targets are limited to variables, fields,
-  indices, and raw dereferences; freestanding file I/O is unavailable.
+- **Compiler gaps.** Array/vector indexing and field assignment require lvalue
+  bases; freestanding file I/O is unavailable.
 - **One backend.** Scalar and x86-64 SSE2 only; no AVX2, NEON/ARM, LLVM IR, or
   WASM backend.

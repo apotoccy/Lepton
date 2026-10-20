@@ -12,7 +12,7 @@ the full conversion policy and current gaps, is
 
 ## Current status
 
-- **124/124** compiler regression tests on scalar and x86-64 SSE2.
+- **127/127** compiler regression tests on scalar and x86-64 SSE2.
 - 13 IR-verifier tests and 12 conversion-policy tests.
 - 64-bit and 32-bit userland builds, freestanding 32-bit kernel, and GRUB ISO.
 - `let` immutability, compound assignment, field/index/nested lvalues.
@@ -119,8 +119,16 @@ grid[0][0] = 4;         // nested index
 Compound operators are `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`,
 and `>>=`. Assignment targets may be variables, fields, array/vector elements,
 pointer elements, or nested combinations. Base and index expressions are
-evaluated once. An arbitrary expression such as `(p + 1)[0] = ...` is not an
-accepted lvalue.
+evaluated once. Pointer-expression bases are allowed:
+
+```lepton
+let p = buf as ptr[i32];
+(p + 1)[0] = 7;
+(p + 2)[0] += 3;
+```
+
+Array and vector indexing still requires an lvalue base, and field assignment
+requires an lvalue base.
 
 Nested aggregate updates use a copy-modify-write sequence internally. They are
 correct but not yet optimized.
@@ -408,8 +416,6 @@ scalar target uses portable loops; the x86-64 target adds SSE2 paths.
 
 ## 14. Current gaps
 
-- Assignment targets are limited to variables, fields, and indices;
-  `(p + 1)[0] = ...` is rejected.
 - Struct and array ordering (`<`, `<=`, `>`, `>=`) is rejected; equality works.
 - Untyped array/vector literals infer a common element type; array conversions
   must be explicit.

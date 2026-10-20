@@ -13,7 +13,7 @@ freestanding 32-bit kernel code.
 
 Current status:
 
-- **124/124** compiler tests on scalar and x86-64 SSE2.
+- **127/127** compiler tests on scalar and x86-64 SSE2.
 - 13 IR-verifier tests and 12 conversion-policy tests.
 - TinyStories-15M boots and runs in QEMU and on a 2008-era Lenovo IdeaPad S9.
 - `fwdpos 0 1` predicts token **9038** (`Once`), matching the Python reference.
@@ -88,8 +88,8 @@ p.inner.x += 1;
 - Parameters are mutable local copies.
 - Pointer pointees remain mutable through an immutable pointer binding.
 - Assignment supports identifiers, fields, array/vector elements, pointer
-  elements, nested combinations, and compound operators (`+=`, `-=`, `*=`, `/=`,
-  `%=`, bitwise, and shifts).
+  elements, nested combinations, pointer-expression bases such as `(p + 1)[0]`,
+  and compound operators (`+=`, `-=`, `*=`, `/=`, `%=`, bitwise, and shifts).
 - Nested aggregate writes use copy-modify-write internally.
 
 ### 3.3 Control flow and comparisons
@@ -242,8 +242,7 @@ ISO to a device and requires `sudo`; verify the device name first.
   `alloc_reset` invalidates all live allocations; per-command reset boundaries
   and null checks for `lp_alloc` are incomplete.
 - **Compiler gaps.** No generics, closures, or definite-assignment analysis.
-  Lvalue bases are limited to variables, fields, indices, and raw
-  dereferences.
+  Array/vector indexing and field assignment still require lvalue bases.
 - **File I/O.** Freestanding file I/O is declared but not defined; the kernel
   has no filesystem driver.
 - **Backends.** Scalar and x86-64 SSE2 only; AVX2 and ARM/NEON are future work.

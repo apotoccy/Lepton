@@ -354,6 +354,17 @@ class Lowering:
         if not lv.mutable:
             self.err(f"cannot assign to immutable {lv.desc}", pos)
 
+    def is_lvalue_syntax(self, e):
+        if e.kind == 'ident':
+            return True
+        if e.kind == 'un' and e.op == '*':
+            return True
+        if e.kind == 'field':
+            return self.is_lvalue_syntax(e.base)
+        if e.kind == 'index':
+            return True
+        return False
+
     def lower_lvalue(self, e, pos):
         """Lower an assignment target to a read/write LValue.
 
@@ -398,6 +409,8 @@ class Lowering:
                 f"'{e.name}'")
 
         if e.kind == 'field':
+            if not self.is_lvalue_syntax(e.base):
+                self.err("field assignment base is not an lvalue", e.pos)
             base = self.lower_lvalue(e.base, e.pos)
             bt = base.type
             if bt[0] != 'named' or bt[1] not in self.module.structs:
@@ -430,31 +443,51 @@ class Lowering:
                           False, f"field '{e.name}'")
 
         if e.kind == 'index':
-            if e.base.kind not in ('ident', 'field', 'index', 'un'):
-                self.not_impl("IR: indexed assignment target must be a "
-                              "variable, field, or index")
-            base = self.lower_lvalue(e.base, e.pos)
+            base = (self.lower_lvalue(e.base, e.pos)
+                    if self.is_lvalue_syntax(e.base) else None)
             idx = self.lower_expr(e.index)
             if idx is None:
                 self.err("index expression has no value", e.pos)
             if not is_int(idx.type):
                 self.err(f"index must be an integer, got '{ts(idx.type)}'",
                          e.pos)
+
+            if base is None:
+                bv = self.lower_expr(e.base)
+                if bv is None or bv.type[0] != 'ptr':
+                    self.err("indexed assignment base must be an array or "
+                             "vector lvalue, or a pointer expression", e.pos)
+                bt = bv.type
+                ptr = bv
+                elem = self.index_element_type(bt)
+                if elem is None:
+                    self.not_impl(f"IR: indexed assignment to '{ts(bt)}'")
+
+                def read_expr_ptr():
+                    tmp = self.func.new_temp(elem)
+                    self.block.add(IRArrayIndex(tmp, ptr, idx, elem, e.pos))
+                    return tmp
+
+                def write_expr_ptr(v):
+                    self.block.add(IRArraySet(ptr, idx, v, e.pos))
+                return LValue(elem, read_expr_ptr, write_expr_ptr, True,
+                              False, "pointer element")
+
             bt = base.type
 
             if bt[0] == 'ptr':
                 elem = self.index_element_type(bt)
                 if elem is None:
                     self.not_impl(f"IR: indexed assignment to '{ts(bt)}'")
+                ptr = base.read()
 
                 def read_ptr():
-                    bv = base.read()
                     tmp = self.func.new_temp(elem)
-                    self.block.add(IRArrayIndex(tmp, bv, idx, elem, e.pos))
+                    self.block.add(IRArrayIndex(tmp, ptr, idx, elem, e.pos))
                     return tmp
 
                 def write_ptr(v):
-                    self.block.add(IRArraySet(base.read(), idx, v, e.pos))
+                    self.block.add(IRArraySet(ptr, idx, v, e.pos))
                 return LValue(elem, read_ptr, write_ptr, True, False,
                               "pointer element")
 

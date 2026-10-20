@@ -108,8 +108,17 @@ a pointer element, or a nested combination of these. The base and index
 expressions are evaluated once. Nested aggregate updates use a
 copy-modify-write sequence internally; this is correct but not yet optimized.
 
-An arbitrary expression is not an assignment target: `(p + 1)[0] = ...` is
-rejected.
+A pointer expression can be the base of an indexed assignment:
+
+```lepton
+let p = buf as ptr[i32];
+(p + 1)[0] = 7;
+(p + 2)[0] += 3;
+```
+
+Array and vector bases must still be lvalues, and field assignment still requires
+an lvalue base. A function returning an array cannot have its result assigned
+through; a function returning a pointer can.
 
 ## Expressions and operators
 
@@ -409,9 +418,8 @@ There is no `do`/`while` or ternary operator.
 
 ## Current gaps
 
-- Assignment targets are limited to variables, fields, indices, and raw
-  dereferences; arbitrary expressions such as `(p + 1)[0] = ...` are not
-  accepted.
+- Array/vector indexing assignment requires an lvalue base; field assignment
+  requires an lvalue base. Pointer-expression bases are supported.
 - Struct and array ordering is rejected; only `==`/`!=` are supported.
 - Untyped array/vector literals still infer a common element type.
 - No generics, closures, or definite-assignment analysis.
