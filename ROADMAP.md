@@ -141,8 +141,8 @@ File I/O & Bytes:
       `read_f32`
 - [x] `read_str` builtin (heap-allocated null-terminated string)
 - [x] Pointer-to-pointer casts for typed views of byte buffers
-- [ ] Freestanding file I/O stubs (`lp_file_size`/`lp_read_file_at`/
-      `lp_write_file` are declared but undefined; using them fails at link time)
+- [x] Freestanding file I/O stubs (`lp_file_size`/`lp_read_file_at`/
+      `lp_write_file` return -1; the kernel has no filesystem)
 
 GGUF Parsing:
 
@@ -311,8 +311,8 @@ The original goal was 32-bit PCs *and* modern devices.
 - [ ] Kernel linear layers support Q4_0/Q8_0 weights plus F32 norms;
       Q4_K/Q5_K/Q6_K and general F32 linear weights are missing
 - [ ] `parse_header` leaks a 24-byte buffer (fine for one call, bad in a loop)
-- [ ] `lp_panic` should be marked `noreturn` in freestanding declarations and
-      the kernel definition
+- [x] `lp_panic` is marked `noreturn` in freestanding declarations and the
+      kernel definition
 
 **Kernel and OS**
 
@@ -325,8 +325,6 @@ The original goal was 32-bit PCs *and* modern devices.
       `(void *, unsigned long)` in C; fix the ABI mismatch
 - [ ] The heap is a fixed 64 MB reservation after the module, not sized from
       the Multiboot memory map
-- [ ] Freestanding file I/O symbols are declared but not defined; using them
-      fails at link time rather than returning -1
 - [ ] BPE merge path uses fixed 64-byte piece slots and a 128-entry piece
       table; long merges/words can overflow
 - [ ] No tokenizer byte fallback for out-of-vocabulary UTF-8

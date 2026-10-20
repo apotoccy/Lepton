@@ -329,7 +329,8 @@ Enums are C enums and support equality and ordering within the same enum type.
 
 - `alloc([T; N])` returns `ptr[[T; N]]`.
 - Hosted file I/O: `file_size(path)`, `read_file_at(path, offset, buf, n)`,
-  `write_file(path, buf, n)`.
+  `write_file(path, buf, n)`. In freestanding builds these return `-1`; the
+  kernel has no filesystem.
 - Byte readers: `read_u8`, `read_u16`, `read_u32`, `read_u64`, `read_i8`,
   `read_i32`, `read_i64`, `read_f16`, `read_f32`.
 - `read_str(buf, offset, n)` allocates a null-terminated string.
@@ -426,4 +427,4 @@ There is no `do`/`while` or ternary operator.
 - Untyped array/vector literals still infer a common element type.
 - No generics or closures.
 - Freestanding `free` is a no-op; `alloc_reset` reclaims the whole bump heap.
-- Freestanding file I/O is declared but not defined.
+- Freestanding file I/O returns `-1`; the kernel has no filesystem driver.

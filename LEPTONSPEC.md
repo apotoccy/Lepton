@@ -252,8 +252,8 @@ ISO to a device and requires `sudo`; verify the device name first.
   `lp_alloc` null checks are incomplete.
 - **Compiler gaps.** No generics or closures.
   Array/vector indexing and field assignment still require lvalue bases.
-- **File I/O.** Freestanding file I/O is declared but not defined; the kernel
-  has no filesystem driver.
+- **File I/O.** Freestanding file I/O returns `-1`; the kernel has no
+  filesystem driver.
 - **Backends.** Scalar and x86-64 SSE2 only; AVX2 and ARM/NEON are future work.
 - **Performance.** Weights are re-dequantized on every token, and the inference
   loop is single-threaded.

@@ -386,8 +386,8 @@ let n = read_file_at("data.bin", 0, buf, sz);
 let w = write_file("out.bin", buf, sz);
 ```
 
-Freestanding file I/O is declared but not defined, so a kernel program that
-calls it fails at link time.
+In freestanding builds these calls return `-1`; the kernel has no filesystem
+driver, so file I/O is unavailable at runtime.
 
 ## 12. Conversions
 
@@ -427,6 +427,6 @@ scalar target uses portable loops; the x86-64 target adds SSE2 paths.
 - Untyped array/vector literals infer a common element type; array conversions
   must be explicit.
 - No generics or closures.
-- Freestanding file I/O is declared but not defined.
+- Freestanding file I/O returns `-1`; the kernel has no filesystem driver.
 - Freestanding `free` is a no-op; `alloc_reset` reclaims the whole bump heap.
 - Only scalar and x86-64 SSE2 backends exist.

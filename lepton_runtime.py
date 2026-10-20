@@ -868,6 +868,9 @@ extern const char *lp_str_bool(int v);
 extern const char *lp_str_char(char c);
 extern void        lp_print(const char *s);
 extern void        lp_println(const char *s);
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noreturn))
+#endif
 extern void        lp_panic(const char *s);
 extern int64_t     lp_file_size(const char *path);
 extern int64_t     lp_read_file_at(const char *path, int64_t offset,

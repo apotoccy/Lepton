@@ -1042,7 +1042,7 @@ fn main() {
     println("[7] Enabling interrupts");
     interrupts_init();
     println("    timer at 100 Hz, keyboard ready");
-    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, help");
+    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, filetest, help");
     println("");
 
     var line_buf = alloc([u8; 128]) as ptr[u8];
@@ -1526,8 +1526,14 @@ fn main() {
                 } else if (starts_with(text, "reset") && (text[5] == '\0' || text[5] == ' ')) {
                     clear_kv_cache(kv_k_buf, kv_v_buf);
                     println("  kv cache reset");
+                } else if (starts_with(text, "filetest")) {
+                    let fs = file_size("test.bin");
+                    let fbuf = alloc([u8; 4]);
+                    let rd = read_file_at("test.bin", 0, fbuf, 4);
+                    let wr = write_file("test.bin", fbuf, 4);
+                    println("  file_size={fs} read={rd} write={wr}");
                 } else if (starts_with(text, "help")) {
-                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, help");
+                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, generate [T] [K], encode, genprompt, tensor, matvec, decodetok, vocab, reset, filetest, help");
                 } else if (line_len > 0) {
                     println("  {text}");
                 }

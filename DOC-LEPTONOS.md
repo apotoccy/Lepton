@@ -84,6 +84,7 @@ line editing.
 - `tensors` — tensor names, dimensions, and quantization types.
 - `modules` — physical addresses and sizes of loaded Multiboot modules.
 - `matvec` — diagnostic matrix-vector multiplication on the first tensor.
+- `filetest` — exercise the freestanding file I/O failure contract.
 
 ### Tokenizer
 
@@ -161,9 +162,9 @@ with GRUB installed and `kernel.elf` plus the model in `/boot` also works.
   marks the heap before each command and releases transient allocations after
   it; `alloc_reset()` reclaims the whole heap but invalidates long-lived
   buffers. Not every `lp_alloc` result is null-checked.
-- **File I/O.** Freestanding file I/O symbols are declared but not defined; the
-  kernel has no filesystem driver.
+- **File I/O.** Freestanding `file_size`, `read_file_at`, and `write_file`
+  return `-1`; the kernel has no filesystem driver.
 - **Compiler gaps.** Array/vector indexing and field assignment require lvalue
-  bases; freestanding file I/O is unavailable.
+  bases.
 - **One backend.** Scalar and x86-64 SSE2 only; no AVX2, NEON/ARM, LLVM IR, or
   WASM backend.

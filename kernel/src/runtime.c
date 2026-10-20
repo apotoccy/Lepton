@@ -114,10 +114,28 @@ void lp_println(const char *s) {
     vga_putc('\n');
 }
 
-void lp_panic(const char *s) {
+__attribute__((noreturn)) void lp_panic(const char *s) {
     lp_print("PANIC: ");
     lp_println(s);
     for (;;) __asm__ volatile("cli; hlt");
+}
+
+/* There is no filesystem in the freestanding kernel. These entry points
+   preserve the hosted API while returning a documented error. */
+long long lp_file_size(const char *path) {
+    (void)path;
+    return -1;
+}
+
+long long lp_read_file_at(const char *path, long long offset,
+                          void *buf, long long n) {
+    (void)path; (void)offset; (void)buf; (void)n;
+    return -1;
+}
+
+long long lp_write_file(const char *path, const void *buf, long long n) {
+    (void)path; (void)buf; (void)n;
+    return -1;
 }
 
 const char *lp_cat(const char *a, const char *b) {
