@@ -56,6 +56,13 @@ void lp_alloc_init(void *start, unsigned long size) {
     heap_max = size;
 }
 
+char *lp_alloc(unsigned long n);
+
+char *lp_alloc_bytes(long long n) {
+    if (n <= 0) return (char *)0;
+    return lp_alloc((unsigned long)n);
+}
+
 char *lp_alloc(unsigned long n) {
     n = (n + 15UL) & ~15UL;
     if (heap_start == 0) return (char *)0;

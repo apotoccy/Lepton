@@ -18,6 +18,7 @@ extern fn lp_sample(logits: ptr[f32], n: i32, temperature: f32, top_k: i32) -> u
 extern fn lp_rand_seed(s: u32) -> void;
 extern fn mb_module_end(idx: u32) -> u32;
 extern fn lp_alloc_init(start: ptr[u8], size: i64) -> void;
+extern fn lp_alloc_bytes(n: i64) -> ptr[u8];
 
 
 fn starts_with(s: str, prefix: str) -> bool {
@@ -128,20 +129,63 @@ fn model_config(model: ptr[u8]) -> ModelConfig {
     return load_model_config(model, tensor_table);
 }
 
-/* The compiled inference path still uses fixed TinyStories-15M buffers and
-   attention indexing. Reject other architectures instead of silently
-   producing wrong output. */
+fn default_model_config() -> ModelConfig {
+    return ModelConfig(
+        n_embd: 288, n_ff: 768, n_layer: 6, n_head: 6,
+        n_head_kv: 6, head_dim: 48, max_seq: 128,
+        vocab_size: 32000, rms_eps: 1e-5f,
+    );
+}
+
+/* Shape and attention requirements of the current compiled path. GQA is
+   parsed but not implemented yet. */
 fn config_supported(cfg: ModelConfig) -> bool {
-    if (cfg.n_embd != 288) { return false; }
-    if (cfg.n_ff != 768) { return false; }
-    if (cfg.n_layer != 6) { return false; }
-    if (cfg.n_head != 6) { return false; }
-    if (cfg.n_head_kv != cfg.n_head) { return false; }  /* no GQA yet */
-    if (cfg.head_dim != 48) { return false; }
-    if (cfg.vocab_size != 32000) { return false; }
+    if (cfg.n_embd <= 0 || cfg.n_embd % 32 != 0) { return false; }
+    if (cfg.n_ff <= 0) { return false; }
+    if (cfg.n_layer <= 0) { return false; }
+    if (cfg.n_head <= 0 || cfg.n_head_kv != cfg.n_head) { return false; }
+    if (cfg.head_dim <= 0) { return false; }
+    if (cfg.n_head * cfg.head_dim != cfg.n_embd) { return false; }
     if (cfg.max_seq <= 0 || cfg.max_seq > 256) { return false; }
+    if (cfg.vocab_size <= 0) { return false; }
     if (cfg.rms_eps <= 0.0f) { return false; }
     return true;
+}
+
+fn config_memory_bytes(cfg: ModelConfig) -> i64 {
+    var wide = cfg.n_embd;
+    if (cfg.n_ff > wide) { wide = cfg.n_ff; }
+    let scratch = cfg.n_embd * wide * 4;
+    let activation = (10 * cfg.n_embd + 3 * cfg.n_ff
+                      + cfg.max_seq) * 4;
+    let kv = 2 * cfg.n_layer * cfg.max_seq * cfg.n_embd * 4;
+    let token_table = cfg.vocab_size * 4;
+    let logits = cfg.vocab_size * 4;
+    let merge_table = 65536 * 4;
+    let line_buf = 128;
+    let rope = (cfg.head_dim / 2) * 8;
+    return scratch + activation + kv + token_table + logits
+         + merge_table + line_buf + rope;
+}
+
+fn config_fits(cfg: ModelConfig) -> bool {
+    return config_memory_bytes(cfg) <= 60 * 1024 * 1024;
+}
+
+fn config_allocatable(cfg: ModelConfig) -> bool {
+    return cfg.n_embd > 0 && cfg.n_ff > 0 && cfg.n_layer > 0
+        && cfg.n_head > 0 && cfg.head_dim > 0
+        && cfg.n_head * cfg.head_dim == cfg.n_embd
+        && cfg.max_seq > 0 && cfg.max_seq <= 256
+        && cfg.vocab_size > 0 && config_fits(cfg);
+}
+
+fn alloc_or_panic(n: i64) -> ptr[u8] {
+    let p = lp_alloc_bytes(n);
+    if (p == 0 as ptr[u8]) {
+        panic("out of memory: model workspace does not fit the heap");
+    }
+    return p;
 }
 
 fn print_model_config(cfg: ModelConfig) -> void {
@@ -255,159 +299,16 @@ fn softmax_inplace(x: ptr[f32], n: i64) -> void {
     }
 }
 
-fn forward_token(model: ptr[u8], token: i64, n_layer: i64,
-                 wbuf: ptr[f32], act: ptr[f32],
-                 out_token: ptr[u32],
-                 trace: bool) -> void {
-    let cfg = model_config(model);
-    if (!config_supported(cfg)) {
-        panic("unsupported model architecture: this build supports TinyStories-15M");
-    }
-    let data_start = model_data_start(model);
-    let tc = read_u64(model, 8);
-    let kc = read_u64(model, 16);
-    let tstart = skip_kv_block(model, 24, kc);
-
-    let n_embd: i64 = cfg.n_embd;
-    let n_ff: i64   = cfg.n_ff;
-
-    /* Act buffer layout — all f32, offsets in floats.
-       [0..288]        hidden
-       [288..576]      normed
-       [576..864]      v_vec
-       [864..1152]     attn_out
-       [1152..1920]    ffn_gate (768)
-       [1920..2688]    ffn_up   (768)
-       [2688..2976]    ffn_down (288)
-       [2976..3264]    logits_row (288) */
-    let hidden   = act;
-    let normed   = act + 288;
-    let v_vec    = act + 576;
-    let attn_out = act + 864;
-    let ffn_gate = act + 1152;
-    let ffn_up   = act + 1920;
-    let ffn_down = act + 2688;
-    let logit_r  = act + 2976;
-
-    /* 1. Embedding */
-    let emb_t = tensor_by_name(model, tstart, tc, "token_embd.weight");
-    dequant_row_q4_0(model, data_start, emb_t, token, hidden);
-    if (trace) {
-        println("  emb: {hidden[0]} {hidden[1]} {hidden[2]}");
-    }
-
-    /* 2. Layers */
-    for layer in 0..n_layer {
-        /* 2a. RMSNorm 1 */
-        let an_name = "blk.{layer}.attn_norm.weight";
-        let an_t = tensor_by_name(model, tstart, tc, an_name);
-        copy_f32_tensor(model, data_start, an_t, wbuf);
-        rmsnorm_n(hidden, wbuf, normed, n_embd, cfg.rms_eps);
-
-        /* 2b. V = attn_v @ normed */
-        let av_name = "blk.{layer}.attn_v.weight";
-        let av_t = tensor_by_name(model, tstart, tc, av_name);
-        dequant_tensor_q4_0(model, data_start, av_t, wbuf + 288);
-        matvec_rows(wbuf + 288, normed, v_vec, n_embd, n_embd);
-
-        /* 2c. attn_out = attn_output @ V */
-        let ao_name = "blk.{layer}.attn_output.weight";
-        let ao_t = tensor_by_name(model, tstart, tc, ao_name);
-        dequant_tensor_q4_0(model, data_start, ao_t, wbuf + 288);
-        matvec_rows(wbuf + 288, v_vec, attn_out, n_embd, n_embd);
-
-        /* 2d. Residual */
-        for i in 0..n_embd {
-            hidden[i] = hidden[i] + attn_out[i];
-        }
-        if (trace && layer == 0) {
-            println("  L0 attn: {hidden[0]} {hidden[1]} {hidden[2]}");
-        }
-
-        /* 2e. RMSNorm 2 */
-        let fn_name = "blk.{layer}.ffn_norm.weight";
-        let fn_t = tensor_by_name(model, tstart, tc, fn_name);
-        copy_f32_tensor(model, data_start, fn_t, wbuf);
-        rmsnorm_n(hidden, wbuf, normed, n_embd, cfg.rms_eps);
-
-        /* 2f. gate = ffn_gate @ normed */
-        let fg_name = "blk.{layer}.ffn_gate.weight";
-        let fg_t = tensor_by_name(model, tstart, tc, fg_name);
-        dequant_tensor_q4_0(model, data_start, fg_t, wbuf);
-        matvec_rows(wbuf, normed, ffn_gate, n_ff, n_embd);
-
-        /* 2g. up = ffn_up @ normed */
-        let fu_name = "blk.{layer}.ffn_up.weight";
-        let fu_t = tensor_by_name(model, tstart, tc, fu_name);
-        dequant_tensor_q4_0(model, data_start, fu_t, wbuf);
-        matvec_rows(wbuf, normed, ffn_up, n_ff, n_embd);
-
-        /* 2h. silu_gate = silu(gate) * up, stored back into ffn_up */
-        for i in 0..n_ff {
-            ffn_up[i] = silu_f32(ffn_gate[i]) * ffn_up[i];
-        }
-
-        /* 2i. ffn_down = ffn_down_w @ silu_gate */
-        let fd_name = "blk.{layer}.ffn_down.weight";
-        let fd_t = tensor_by_name(model, tstart, tc, fd_name);
-        dequant_tensor_q4_0(model, data_start, fd_t, wbuf);
-        matvec_rows(wbuf, ffn_up, ffn_down, n_embd, n_ff);
-
-        /* 2j. Residual */
-        for i in 0..n_embd {
-            hidden[i] = hidden[i] + ffn_down[i];
-        }
-        if (trace && layer == 0) {
-            println("  L0 ffn:  {hidden[0]} {hidden[1]} {hidden[2]}");
-        }
-    }
-    if (trace) {
-        println("  final:  {hidden[0]} {hidden[1]} {hidden[2]}");
-    }
-
-    /* 3. Final RMSNorm */
-    let onf_t = tensor_by_name(model, tstart, tc, "output_norm.weight");
-    copy_f32_tensor(model, data_start, onf_t, wbuf);
-    rmsnorm_n(hidden, wbuf, normed, n_embd, cfg.rms_eps);
-
-    /* 4. Output projection, per-vocab-row dequant, argmax.
-       output.weight can be type=2 (Q4_0) or type=8 (Q8_0); handle both. */
-    let ow_t = tensor_by_name(model, tstart, tc, "output.weight");
-    let v_size = ow_t.dim1 as i64;
-    var best_l: f32 = -3.0e38f;
-    var best_t: u32 = 0 as u32;
-    for vv in 0..v_size {
-        if (ow_t.ggml_type == 2 as u32) {
-            dequant_row_q4_0(model, data_start, ow_t, vv, logit_r);
-        } else {
-            /* Q8_0: 34 bytes per 32 elements. */
-            let blocks = n_embd / 32;
-            let row_bytes = blocks * 34;
-            let src = (model + data_start + (ow_t.data_offset as i64) + vv * row_bytes) as ptr[u8];
-            dequant_q8_0_tensor(src, logit_r, blocks);
-        }
-        var lp_dot: f32 = 0.0f;
-        for j in 0..n_embd {
-            lp_dot = lp_dot + logit_r[j] * normed[j];
-        }
-        if (lp_dot > best_l) {
-            best_l = lp_dot;
-            best_t = vv as u32;
-        }
-    }
-    out_token[0] = best_t;
-}
-
 fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
                         token: i64, pos: i64,
                         wbuf: ptr[f32], act: ptr[f32],
                         kv_k: ptr[f32], kv_v: ptr[f32],
                         freqs: ptr[f64],
                         logits: ptr[f32]) -> void {
-    if (!config_supported(cfg)) {
-        panic("unsupported model architecture: this build supports TinyStories-15M");
+    if (!config_supported(cfg) || !config_fits(cfg)) {
+        panic("unsupported model architecture or workspace does not fit");
     }
-    if (pos < 0 || pos >= cfg.max_seq || pos >= 256) {
+    if (pos < 0 || pos >= cfg.max_seq) {
         panic("context position out of range");
     }
     let data_start = model_data_start(model);
@@ -417,25 +318,25 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
 
     let n_embd: i64 = cfg.n_embd;
     let n_ff:   i64 = cfg.n_ff;
-    let max_seq: i64 = 256;
+    let max_seq: i64 = cfg.max_seq;
     let n_layer: i64 = cfg.n_layer;
     let n_head: i64 = cfg.n_head;
     let head_dim: i64 = cfg.head_dim;
 
     let hidden    = act;
-    let normed    = act + 288;
-    let q_buf     = act + 576;
-    let k_buf     = act + 864;
-    let v_buf     = act + 1152;
-    let attended  = act + 1440;
-    let attn_out  = act + 1728;
-    let gate      = act + 2016;
-    let up        = act + 2784;
-    let silu_gate = act + 3552;
-    let down      = act + 4320;
-    let final_n   = act + 4608;
-    let logit_r   = act + 4896;
-    let scores    = act + 5184;
+    let normed    = act + n_embd;
+    let q_buf     = act + 2 * n_embd;
+    let k_buf     = act + 3 * n_embd;
+    let v_buf     = act + 4 * n_embd;
+    let attended  = act + 5 * n_embd;
+    let attn_out  = act + 6 * n_embd;
+    let gate      = act + 7 * n_embd;
+    let up        = act + 7 * n_embd + n_ff;
+    let silu_gate = act + 7 * n_embd + 2 * n_ff;
+    let down      = act + 7 * n_embd + 3 * n_ff;
+    let final_n   = act + 8 * n_embd + 3 * n_ff;
+    let logit_r   = act + 9 * n_embd + 3 * n_ff;
+    let scores    = act + 10 * n_embd + 3 * n_ff;
 
     /* 1. Embedding */
     let emb_t = tensor_by_name(model, tstart, tc, "token_embd.weight");
@@ -539,6 +440,9 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
     /* Output projection: fill logits[vocab] with raw scores */
     let ow_t = tensor_by_name(model, tstart, tc, "output.weight");
     let v_size = ow_t.dim1 as i64;
+    if (v_size > cfg.vocab_size) {
+        panic("output vocabulary exceeds configured vocabulary");
+    }
     for vv in 0..v_size {
         if (ow_t.ggml_type == 2 as u32) {
             dequant_row_q4_0(model, data_start, ow_t, vv, logit_r);
@@ -629,8 +533,9 @@ fn piece_eq(model: ptr[u8], a_off: i64, a_len: i64,
     return true;
 }
 
-fn clear_kv_cache(kv_k: ptr[f32], kv_v: ptr[f32]) -> void {
-    for i in 0..(6 * 256 * 288) {
+fn clear_kv_cache(kv_k: ptr[f32], kv_v: ptr[f32],
+                  n_layer: i64, max_seq: i64, n_embd: i64) -> void {
+    for i in 0..(n_layer * max_seq * n_embd) {
         kv_k[i] = 0.0f;
         kv_v[i] = 0.0f;
     }
@@ -1025,20 +930,34 @@ fn main() {
     println("");
 
     /* ---- 7. Interrupts + interactive shell ---- */
-    let scratch_bytes = alloc([u8; 4194304]);   /* 4 MB for dequantized f32 */
-    /* 64K vocab slots (256 KB). TinyStories uses 32000; larger models
-       need dynamic sizing. Cast from ptr[[u32; 65536]] to ptr[u32] so
-       the tok_table parameter type matches the tokenizer helpers. */
-    let tok_table = alloc([u32; 65536]) as ptr[u32];
+    var active_cfg = default_model_config();
+    if (mb_module_count() > 0 as u32) {
+        let boot_cfg = model_config(mb_module_start(0 as u32) as ptr[u8]);
+        if (config_allocatable(boot_cfg)) {
+            active_cfg = boot_cfg;
+        } else {
+            println("  warning: model config does not fit; using default buffers");
+        }
+    }
+
+    var wide = active_cfg.n_embd;
+    if (active_cfg.n_ff > wide) { wide = active_cfg.n_ff; }
+    let scratch_bytes = alloc_or_panic(active_cfg.n_embd * wide * 4);
+    let tok_table = alloc_or_panic(active_cfg.vocab_size * 4) as ptr[u32];
     var tok_count: i64 = -1;
-    let activation_buf = alloc([f32; 65536]) as ptr[f32];
-    let kv_k_buf = alloc([f32; 442368]) as ptr[f32];   /* 6*256*288 */
-    let kv_v_buf = alloc([f32; 442368]) as ptr[f32];
-    let rope_freqs = alloc([f64; 24]) as ptr[f64];
-    let logits_buf = alloc([f32; 32000]) as ptr[f32];
-    let merge_table = alloc([u32; 65536]) as ptr[u32];
+    let act_floats = 10 * active_cfg.n_embd + 3 * active_cfg.n_ff
+                   + active_cfg.max_seq;
+    let activation_buf = alloc_or_panic(act_floats * 4) as ptr[f32];
+    let kv_floats = active_cfg.n_layer * active_cfg.max_seq
+                  * active_cfg.n_embd;
+    let kv_k_buf = alloc_or_panic(kv_floats * 4) as ptr[f32];
+    let kv_v_buf = alloc_or_panic(kv_floats * 4) as ptr[f32];
+    let rope_len = active_cfg.head_dim / 2;
+    let rope_freqs = alloc_or_panic(rope_len * 8) as ptr[f64];
+    let logits_buf = alloc_or_panic(active_cfg.vocab_size * 4) as ptr[f32];
+    let merge_table = alloc_or_panic(65536 * 4) as ptr[u32];
     var merge_count: i64 = -1;
-    build_rope_freqs(rope_freqs, 48);
+    build_rope_freqs(rope_freqs, active_cfg.head_dim);
     println("[7] Enabling interrupts");
     interrupts_init();
     println("    timer at 100 Hz, keyboard ready");
@@ -1228,7 +1147,7 @@ fn main() {
                         let cm = mb_module_start(0 as u32) as ptr[u8];
                         let cfg = model_config(cm);
                         print_model_config(cfg);
-                        if (config_supported(cfg)) {
+                        if (config_supported(cfg) && config_fits(cfg)) {
                             println("  inference = supported");
                         } else {
                             println("  inference = unsupported by this build");
@@ -1302,17 +1221,29 @@ fn main() {
                                 tok_table);
                         }
                         let fwd_model = mb_module_start(0 as u32) as ptr[u8];
-                        let fwd_buf = scratch_bytes as ptr[f32];
-                        let fwd_out = alloc([u32; 1]) as ptr[u32];
-                        println("  running 6-layer forward for token <s> (id 1)...");
-                        forward_token(fwd_model, 1, 6,
-                                      fwd_buf, activation_buf,
-                                      fwd_out, true);
-                        println("  predicted token = {fwd_out[0]}");
-                        let fwd_str = decode_tok(fwd_model, tok_table, fwd_out[0]);
-                        print("  '");
-                        print_token(fwd_str);
-                        println("'");
+                        let fwd_cfg = model_config(fwd_model);
+                        if (!config_supported(fwd_cfg) || !config_fits(fwd_cfg)) {
+                            println("  unsupported model shape");
+                        } else {
+                            let fwd_buf = scratch_bytes as ptr[f32];
+                            println("  running forward for token <s> (id 1)...");
+                            clear_kv_cache(kv_k_buf, kv_v_buf,
+                                           active_cfg.n_layer,
+                                           active_cfg.max_seq,
+                                           active_cfg.n_embd);
+                            forward_token_at_pos(fwd_model, fwd_cfg, 1, 0,
+                                                 fwd_buf, activation_buf,
+                                                 kv_k_buf, kv_v_buf,
+                                                 rope_freqs, logits_buf);
+                            let fwd_best = lp_argmax(logits_buf,
+                                                     fwd_cfg.vocab_size as i32);
+                            println("  predicted token = {fwd_best}");
+                            let fwd_str = decode_tok(fwd_model, tok_table,
+                                                     fwd_best);
+                            print("  '");
+                            print_token(fwd_str);
+                            println("'");
+                        }
                     }
                 } else if (starts_with(text, "fwdpos")) {
                     if (mb_module_count() == 0 as u32) {
@@ -1330,12 +1261,14 @@ fn main() {
                         let fp_cfg = model_config(fp_m);
                         let fp_w = scratch_bytes as ptr[f32];
                         let fp_a = activation_buf as ptr[f32];
-                        clear_kv_cache(kv_k_buf, kv_v_buf);
+                        clear_kv_cache(kv_k_buf, kv_v_buf,
+                                   active_cfg.n_layer, active_cfg.max_seq,
+                                   active_cfg.n_embd);
                         forward_token_at_pos(fp_m, fp_cfg, fp_tok, fp_pos,
                                              fp_w, fp_a,
                                              kv_k_buf, kv_v_buf, rope_freqs,
                                              logits_buf);
-                        let fp_best = lp_argmax(logits_buf, 32000 as i32);
+                        let fp_best = lp_argmax(logits_buf, fp_cfg.vocab_size as i32);
                         println("  pos={fp_pos} token={fp_tok} -> {fp_best}");
                         let fp_s = decode_tok(fp_m, tok_table, fp_best);
                         print("  '");
@@ -1367,7 +1300,9 @@ fn main() {
 
                         let gen_w = scratch_bytes as ptr[f32];
                         let gen_a = activation_buf as ptr[f32];
-                        clear_kv_cache(kv_k_buf, kv_v_buf);
+                        clear_kv_cache(kv_k_buf, kv_v_buf,
+                                   active_cfg.n_layer, active_cfg.max_seq,
+                                   active_cfg.n_embd);
 
                         println("  generating 30 tokens (temp={gen_temp}, top_k={gen_k})...");
                         print("  [dbg: start] ");
@@ -1379,7 +1314,7 @@ fn main() {
                                                  gen_w, gen_a,
                                                  kv_k_buf, kv_v_buf, rope_freqs,
                                                  logits_buf);
-                            cur = lp_sample(logits_buf, 32000 as i32,
+                            cur = lp_sample(logits_buf, gen_cfg.vocab_size as i32,
                                             gen_temp, gen_k as i32);
                             let gs = decode_tok(gen_m, tok_table, cur);
                             print_token(gs);
@@ -1482,7 +1417,9 @@ fn main() {
                                 println("");
 
                                 /* Clear KV */
-                                clear_kv_cache(kv_k_buf, kv_v_buf);
+                                clear_kv_cache(kv_k_buf, kv_v_buf,
+                                   active_cfg.n_layer, active_cfg.max_seq,
+                                   active_cfg.n_embd);
                                 lp_rand_seed(ticks() + 1 as u32);
 
                                 /* Run forward on prompt tokens */
@@ -1499,7 +1436,7 @@ fn main() {
                                 /* Generate */
                                 println("  generating 30 tokens (temp={gp_t}, top_k={gp_k})...");
                                 print("  ");
-                                var gp_next: u32 = lp_sample(logits_buf, 32000 as i32,
+                                var gp_next: u32 = lp_sample(logits_buf, gp_cfg.vocab_size as i32,
                                                               gp_t as f32, gp_k as i32);
                                 let gp_s0 = decode_tok(gp_m, tok_table, gp_next);
                                 print_token(gp_s0);
@@ -1512,7 +1449,7 @@ fn main() {
                                                          gp_w, gp_a,
                                                          kv_k_buf, kv_v_buf, rope_freqs,
                                                          logits_buf);
-                                    gp_next = lp_sample(logits_buf, 32000 as i32,
+                                    gp_next = lp_sample(logits_buf, gp_cfg.vocab_size as i32,
                                                         gp_t as f32, gp_k as i32);
                                     let gp_sn = decode_tok(gp_m, tok_table, gp_next);
                                     print_token(gp_sn);
@@ -1524,7 +1461,9 @@ fn main() {
                         }
                     }
                 } else if (starts_with(text, "reset") && (text[5] == '\0' || text[5] == ' ')) {
-                    clear_kv_cache(kv_k_buf, kv_v_buf);
+                    clear_kv_cache(kv_k_buf, kv_v_buf,
+                                   active_cfg.n_layer, active_cfg.max_seq,
+                                   active_cfg.n_embd);
                     println("  kv cache reset");
                 } else if (starts_with(text, "filetest")) {
                     let fs = file_size("test.bin");

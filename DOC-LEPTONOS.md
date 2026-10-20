@@ -22,9 +22,9 @@ see [ROADMAP.md](ROADMAP.md).
 - Inference: TinyStories-15M loads from a Multiboot module. `fwdpos 0 1`
   predicts token **9038** (`Once`), matching the Python reference.
 - Tokenizer: `encode Once upon a time` returns `[9038, 2501, 263, 931]`.
-- Scope: the inference path is specialized to the TinyStories-15M shape and
-  Q4_0/Q8_0 weights. GGUF metadata is parsed and validated; unsupported shapes
-  (including GQA) are rejected, and dynamic inference remains future work.
+- Scope: inference workspaces are sized from GGUF metadata for the supported
+  non-GQA shape, within a 60 MB budget and 256-position context cap. Q4_0/Q8_0
+  and F32 norms are supported; GQA and modern K-quants are not.
 
 ## 1. Architecture
 
@@ -150,14 +150,13 @@ with GRUB installed and `kernel.elf` plus the model in `/boot` also works.
 
 ## 6. Limitations
 
-- **One model shape.** `n_embd=288`, `n_ff=768`, `n_layer=6`, `n_head=6`,
-  `head_dim=48`, vocab 32000, and a 256-position KV cache are still required by
-  the compiled inference and buffer layout. GGUF metadata is parsed and
-  unsupported shapes are rejected.
+- **Dimensions.** Activation, KV, logits, token-table, and scratch buffers are
+  sized from GGUF metadata. The shape must fit a 60 MB workspace budget;
+  tokenizer merge/ID buffers still have fixed limits.
 - **One quantization set.** Q4_0, Q8_0, and F32 norms only; Q4_K/Q5_K/Q6_K and
   grouped-query attention are not implemented. GQA configurations are rejected.
 - **Context safety.** The configured `max_seq` is enforced by the forward guard
-  and generation loops; the KV cache is still allocated for 256 positions.
+  and generation loops, with a hard cap of 256 KV positions.
 - **Memory.** `free` is a no-op in the freestanding bump allocator. The REPL
   marks the heap before each command and releases transient allocations after
   it; `alloc_reset()` reclaims the whole heap but invalidates long-lived

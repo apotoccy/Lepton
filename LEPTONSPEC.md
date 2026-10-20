@@ -217,8 +217,9 @@ include:
 - generation: `generate`, `genprompt`, `fwdpos`, `forward`.
 
 `config` parses and prints GGUF hyperparameters and reports whether the
-compiled inference path supports the shape. The path remains specialized to
-TinyStories-15M; unsupported shapes (including GQA) are rejected.
+compiled inference path supports the shape. Activation, KV, logits, and
+token-table workspaces are sized from the config within a 60 MB budget;
+unsupported shapes (including GQA) are rejected.
 
 ## 6. Build and test
 
@@ -241,11 +242,12 @@ ISO to a device and requires `sudo`; verify the device name first.
 
 ## 7. Current limitations
 
-- **One model shape.** `n_embd=288`, `n_ff=768`, `n_layer=6`, `n_head=6`,
-  `head_dim=48`, vocab 32000, and a 256-position KV cache are still required by
-  the compiled inference path; GGUF config is parsed and validated.
+- **Model dimensions.** Activation, KV, logits, token-table, and scratch
+  workspaces are sized from GGUF metadata within a 60 MB budget; the context
+  cap is 256 positions. Tokenizer merge/ID buffers still have fixed limits.
 - **Context safety.** The configured `max_seq` is enforced by the forward guard
-  and generation loops; the KV cache is still allocated for 256 positions.
+  and generation loops.
+- **No GQA.** Grouped-query attention is parsed but rejected.
 - **Quantization coverage.** Q4_0/Q8_0/F32 only; no K-quants or GQA.
 - **Memory.** The bump allocator cannot reclaim individual blocks. Mark/release
   and `alloc_reset` invalidate allocations after their reset point, and

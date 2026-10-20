@@ -83,10 +83,10 @@ as a GRUB ISO.
   and quantized conversions. There are no implicit array conversions.
 - **GGUF configuration:** the kernel parses `ModelConfig` from GGUF metadata
   (embedding/FFN widths, layers, heads, KV heads, RoPE dimension, context
-  length, vocabulary, and RMS epsilon), validates the shape, displays it via
-  `config`, and enforces the configured context bound. Inference remains
-  specialized to the TinyStories-15M shape for now; unsupported shapes,
-  including GQA, are rejected rather than run with wrong dimensions.
+  length, vocabulary, and RMS epsilon), displays it via `config`, and sizes
+  its activation, KV, logits, and token table workspaces from it. Inference is
+  rejected if the shape is unsupported or exceeds the 60 MB workspace budget.
+  GQA is parsed but not implemented yet.
 - **Allocator control:** `free(ptr)` releases a hosted allocation;
   `alloc_reset()` reclaims the whole freestanding bump heap;
   `alloc_mark()`/`alloc_release(mark)` reclaim transient allocations. The kernel
@@ -292,14 +292,14 @@ transformer layers (5.97M). The memory/performance arithmetic in
 These are the boundaries of the current implementation, not a wish list; see
 [ROADMAP.md](ROADMAP.md) for the work planned against them.
 
-- **One model shape.** Inference still hardcodes `n_embd=288`, `n_ff=768`,
-  `n_layer=6`, `n_head=6`, `head_dim=48`, and a 32000-entry logits/token table.
-  GGUF metadata is parsed and validated, and unsupported shapes are rejected;
-  dynamic buffers, dynamic inference, and GQA remain future work. Only
+- **Model dimensions.** Activation, KV, logits, and token-table workspaces are
+  sized from GGUF metadata, subject to a 60 MB budget and a 256-position
+  context cap. GQA, Q4_K/Q5_K/Q6_K, and general F32 linear weights are not
+  implemented; tokenizer merge/ID buffers still have fixed limits. Only
   Q4_0/Q8_0 weights and F32 norms are handled.
 - **Context safety.** The configured `max_seq` is enforced by the forward guard
   and generation loops, with a hard cap of 256 KV positions. The KV cache is
-  still allocated for 256 positions.
+  allocated for exactly `max_seq` positions.
 - **Conversion policy.** Lossy numeric conversions and unsafe pointer
   conversions warn by default; `--strict-types` makes them errors. Explicit
   `as` casts never warn. Integer-to-float is allowed without warning (wide

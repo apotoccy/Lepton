@@ -794,6 +794,7 @@ static LP_UNUSED uint32_t lp_sample(float *logits, int32_t n,
     if (top_k > 0 && top_k < n) {
         if (top_k > 128) top_k = 128;
         float kth[128];
+        kth[0] = threshold;
         int32_t count = 0;
         for (int32_t i = 0; i < n; i++) {
             float v = logits[i];

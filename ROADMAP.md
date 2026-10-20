@@ -158,10 +158,10 @@ Dequantization & Math:
 
 - [x] Q4_0 dequantization (18-byte blocks, 32 elements)
 - [x] Q8_0 dequantization (34-byte blocks, 32 elements)
-- [x] Full Llama forward pass for the TinyStories-15M shape (288 embedding
-      width, 6 layers, 6 heads, 48 head dim, 768 FFN, 32k vocab); the shape is
-      hardcoded, but GGUF configuration is now parsed and validated
+- [x] Full Llama forward pass, now config-sized for embedding/FFN widths,
+      layers, heads, head dimension, vocabulary, and context
 - [x] `ModelConfig` parsing (`std/gguf/config.lp`) and shape validation
+- [x] Config-driven activation, KV, logits, token-table, and scratch sizing
 - [x] Context guard against the configured `max_seq` (256-position cache cap)
 - [x] Q, K, V matvecs, RoPE, multi-head attention, softmax, KV cache
 - [x] RMSNorm, SwiGLU MLP (inline in kernel)
@@ -257,7 +257,8 @@ tensors, not the 15M model label.
 - [x] Derive `head_dim`/vocabulary and validate the supported shape; reject
       unsupported shapes and GQA instead of running with wrong dimensions
 - [ ] Validate tensor dimensions and types at load
-- [ ] Remove the hardcoded 288/768/6/48/32000/256 constants from the kernel
+- [ ] Remove the remaining tokenizer fixed-buffer limits (merge table, word
+      and piece buffers, output ID capacity)
 - [ ] Add grouped-query attention (`n_head_kv`)
 - [ ] Add Q4_K/Q5_K/Q6_K dequantization or, preferably, quantized dot products
 - [ ] Plan memory for 1B+ models. They do not fit the current 64 MB heap;
@@ -316,9 +317,9 @@ The original goal was 32-bit PCs *and* modern devices.
 
 **Kernel and OS**
 
-- [ ] Inference is still hardcoded to the TinyStories-15M shape; GGUF config is
-      parsed and unsupported shapes are rejected, but dynamic inference/GQA
-      remain future work
+- [ ] GQA remains unsupported; Q4_K/Q5_K/Q6_K and general F32 linear weights
+      are not implemented. Inference workspaces are config-sized within a
+      60 MB budget and a 256-position context cap.
 - [ ] `lp_alloc` null returns are not checked everywhere; `free` remains a
       no-op in the bump allocator
 - [ ] `lp_alloc_init` is declared as `(ptr[u8], i64)` in Lepton but defined as
