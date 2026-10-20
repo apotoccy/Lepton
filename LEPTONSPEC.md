@@ -164,7 +164,7 @@ The standard library parses GGUF directly from memory:
 - **Q8_0:** 34-byte blocks, 32 elements, f16 scale plus 32 int8 values.
 - F32 norm tensors are handled directly.
 
-Q4_K/Q5_K/Q6_K and grouped-query attention are not implemented.
+Q4_K/Q5_K/Q6_K are not implemented. Grouped-query attention is supported.
 
 ### 4.3 Transformer
 
@@ -227,7 +227,7 @@ shapes when keys are missing. Fatal panics print a Ctrl+Alt+Del reboot hint.
 `config` parses and prints GGUF hyperparameters and reports whether the
 compiled inference path supports the shape. Activation, KV, logits, and
 token-table workspaces are sized from the config within a 60 MB budget;
-unsupported shapes (including GQA) are rejected.
+unsupported shapes are rejected.
 
 ## 6. Build and test
 
@@ -255,8 +255,7 @@ ISO to a device and requires `sudo`; verify the device name first.
   cap is 256 positions. Tokenizer merge/ID buffers still have fixed limits.
 - **Context safety.** The configured `max_seq` is enforced by the forward guard
   and generation loops.
-- **No GQA.** Grouped-query attention is parsed but rejected.
-- **Quantization coverage.** Q4_0/Q8_0/F32 only; no K-quants or GQA.
+- **Quantization coverage.** Q4_0/Q8_0/F32 only; no K-quants.
 - **Memory.** The bump allocator cannot reclaim individual blocks. Mark/release
   and `alloc_reset` invalidate allocations after their reset point, and
   `lp_alloc` null checks are incomplete.

@@ -87,7 +87,7 @@ as a GRUB ISO.
   and RMS epsilon), displays it via `config`, and sizes
   its activation, KV, logits, and token table workspaces from it. Inference is
   rejected if the shape is unsupported or exceeds the 60 MB workspace budget.
-  GQA is parsed but not implemented yet.
+  Grouped-query attention (`n_head_kv < n_head`) is supported.
 - **Allocator control:** `free(ptr)` releases a hosted allocation;
   `alloc_reset()` reclaims the whole freestanding bump heap;
   `alloc_mark()`/`alloc_release(mark)` reclaim transient allocations. The kernel
@@ -300,7 +300,7 @@ These are the boundaries of the current implementation, not a wish list; see
 
 - **Model dimensions.** Activation, KV, logits, and token-table workspaces are
   sized from GGUF metadata, subject to a 60 MB budget and a 256-position
-  context cap. GQA, Q4_K/Q5_K/Q6_K, and general F32 linear weights are not
+  context cap. Q4_K/Q5_K/Q6_K and general F32 linear weights are not
   implemented; tokenizer merge/ID buffers still have fixed limits. Only
   Q4_0/Q8_0 weights and F32 norms are handled.
 - **Context safety.** The configured `max_seq` is enforced by the forward guard
@@ -319,8 +319,7 @@ These are the boundaries of the current implementation, not a wish list; see
   decoding no longer leak between commands. Long-lived buffers are allocated
   before the mark. Not every `lp_alloc` result is checked for null, and the heap
   remains a fixed 64 MB reservation after the loaded module.
-- **Quantization coverage.** Q4_K/Q5_K/Q6_K and grouped-query attention (GQA)
-  are not implemented. The kernel's linear layers handle Q4_0/Q8_0 weights plus
+- **Quantization coverage.** Q4_K/Q5_K/Q6_K are not implemented. The kernel's linear layers handle Q4_0/Q8_0 weights plus
   F32 norm tensors; other tensor types are not supported.
 - **Freestanding file I/O.** `lp_file_size`, `lp_read_file_at`, and
   `lp_write_file` are defined in the kernel and return `-1`; there is no

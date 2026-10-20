@@ -22,9 +22,9 @@ see [ROADMAP.md](ROADMAP.md).
 - Inference: TinyStories-15M loads from a Multiboot module. `fwdpos 0 1`
   predicts token **9038** (`Once`), matching the Python reference.
 - Tokenizer: `encode Once upon a time` returns `[9038, 2501, 263, 931]`.
-- Scope: inference workspaces are sized from GGUF metadata for the supported
-  non-GQA shape, within a 60 MB budget and 256-position context cap. Q4_0/Q8_0
-  and F32 norms are supported; GQA and modern K-quants are not.
+- Scope: inference workspaces are sized from GGUF metadata, within a 60 MB
+  budget and 256-position context cap. Q4_0/Q8_0, F32 norms, and GQA are
+  supported; modern K-quants are not.
 
 ## 1. Architecture
 
@@ -165,8 +165,8 @@ with GRUB installed and `kernel.elf` plus the model in `/boot` also works.
 - **Dimensions.** Activation, KV, logits, token-table, and scratch buffers are
   sized from GGUF metadata. The shape must fit a 60 MB workspace budget;
   tokenizer merge/ID buffers still have fixed limits.
-- **One quantization set.** Q4_0, Q8_0, and F32 norms only; Q4_K/Q5_K/Q6_K and
-  grouped-query attention are not implemented. GQA configurations are rejected.
+- **One quantization set.** Q4_0, Q8_0, and F32 norms only; Q4_K/Q5_K/Q6_K are
+  not implemented.
 - **Context safety.** The configured `max_seq` is enforced by the forward guard
   and generation loops, with a hard cap of 256 KV positions.
 - **Memory.** `free` is a no-op in the freestanding bump allocator. The REPL

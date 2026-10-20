@@ -151,8 +151,9 @@ fn config_issue(cfg: ModelConfig) -> str {
     if (cfg.n_ff <= 0) { return "invalid n_ff"; }
     if (cfg.n_layer <= 0) { return "invalid n_layer"; }
     if (cfg.n_head <= 0) { return "invalid n_head"; }
-    if (cfg.n_head_kv != cfg.n_head) {
-        return "GQA is not implemented (n_head_kv != n_head)";
+    if (cfg.n_head_kv <= 0) { return "invalid n_head_kv"; }
+    if (cfg.n_head % cfg.n_head_kv != 0) {
+        return "n_head is not divisible by n_head_kv";
     }
     if (cfg.head_dim <= 0) { return "invalid head_dim"; }
     if (cfg.n_head * cfg.head_dim != cfg.n_embd) {
@@ -173,7 +174,8 @@ fn config_memory_bytes(cfg: ModelConfig) -> i64 {
     let scratch = cfg.n_embd * wide * 4;
     let activation = (10 * cfg.n_embd + 3 * cfg.n_ff
                       + cfg.max_seq) * 4;
-    let kv = 2 * cfg.n_layer * cfg.max_seq * cfg.n_embd * 4;
+    let kv = 2 * cfg.n_layer * cfg.max_seq
+           * (cfg.n_head_kv * cfg.head_dim) * 4;
     let token_table = cfg.vocab_size * 4;
     let logits = cfg.vocab_size * 4;
     let merge_table = 65536 * 4;
@@ -189,7 +191,9 @@ fn config_fits(cfg: ModelConfig) -> bool {
 
 fn config_allocatable(cfg: ModelConfig) -> bool {
     return cfg.n_embd > 0 && cfg.n_ff > 0 && cfg.n_layer > 0
-        && cfg.n_head > 0 && cfg.head_dim > 0
+        && cfg.n_head > 0 && cfg.n_head_kv > 0
+        && cfg.n_head % cfg.n_head_kv == 0
+        && cfg.head_dim > 0
         && cfg.n_head * cfg.head_dim == cfg.n_embd
         && cfg.max_seq > 0 && cfg.max_seq <= 256
         && cfg.vocab_size > 0 && config_fits(cfg);
@@ -344,7 +348,9 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
     let max_seq: i64 = cfg.max_seq;
     let n_layer: i64 = cfg.n_layer;
     let n_head: i64 = cfg.n_head;
+    let n_head_kv: i64 = cfg.n_head_kv;
     let head_dim: i64 = cfg.head_dim;
+    let kv_dim: i64 = n_head_kv * head_dim;
 
     let hidden    = act;
     let normed    = act + n_embd;
@@ -379,29 +385,33 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
 
         let ak_t = tensor_by_name(model, tstart, tc, "blk.{layer}.attn_k.weight");
         dequant_tensor_q4_0(model, data_start, ak_t, wbuf);
-        matvec_rows(wbuf, normed, k_buf, n_embd, n_embd);
+        matvec_rows(wbuf, normed, k_buf, kv_dim, n_embd);
 
         let av_t = tensor_by_name(model, tstart, tc, "blk.{layer}.attn_v.weight");
         dequant_tensor_q4_0(model, data_start, av_t, wbuf);
-        matvec_rows(wbuf, normed, v_buf, n_embd, n_embd);
+        matvec_rows(wbuf, normed, v_buf, kv_dim, n_embd);
 
         /* RoPE (identity at pos=0) */
         rope_apply(q_buf, pos, freqs, n_head, head_dim);
-        rope_apply(k_buf, pos, freqs, n_head, head_dim);
+        rope_apply(k_buf, pos, freqs, n_head_kv, head_dim);
 
         /* Cache K, V at [layer][pos] */
-        let cache_base = (layer * max_seq + pos) * n_embd;
-        for i in 0..n_embd {
+        let cache_base = (layer * max_seq + pos) * kv_dim;
+        for i in 0..kv_dim {
             kv_k[cache_base + i] = k_buf[i];
             kv_v[cache_base + i] = v_buf[i];
         }
 
-        /* Attention over positions 0..pos */
+        /* Attention over positions 0..pos. Query heads are grouped onto
+           n_head_kv KV heads. */
         let scale: f32 = 1.0f / sqrt(head_dim as f32);
+        let group = n_head / n_head_kv;
         for h in 0..n_head {
             let q_off = h * head_dim;
+            let kv_h = h / group;
+            let kv_off = kv_h * head_dim;
             for p in 0..(pos + 1) {
-                let kbase = (layer * max_seq + p) * n_embd + q_off;
+                let kbase = (layer * max_seq + p) * kv_dim + kv_off;
                 var acc_s: f32 = 0.0f;
                 for d in 0..head_dim {
                     acc_s = acc_s + q_buf[q_off + d] * kv_k[kbase + d];
@@ -412,7 +422,7 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
             for d in 0..head_dim {
                 var acc_v: f32 = 0.0f;
                 for p in 0..(pos + 1) {
-                    let vbase = (layer * max_seq + p) * n_embd + q_off;
+                    let vbase = (layer * max_seq + p) * kv_dim + kv_off;
                     acc_v = acc_v + scores[p] * kv_v[vbase + d];
                 }
                 attended[q_off + d] = acc_v;
@@ -559,8 +569,8 @@ fn piece_eq(model: ptr[u8], a_off: i64, a_len: i64,
 }
 
 fn clear_kv_cache(kv_k: ptr[f32], kv_v: ptr[f32],
-                  n_layer: i64, max_seq: i64, n_embd: i64) -> void {
-    for i in 0..(n_layer * max_seq * n_embd) {
+                  n_layer: i64, max_seq: i64, n_kv: i64) -> void {
+    for i in 0..(n_layer * max_seq * n_kv) {
         kv_k[i] = 0.0f;
         kv_v[i] = 0.0f;
     }
@@ -974,7 +984,7 @@ fn main() {
                    + active_cfg.max_seq;
     let activation_buf = alloc_or_panic(act_floats * 4) as ptr[f32];
     let kv_floats = active_cfg.n_layer * active_cfg.max_seq
-                  * active_cfg.n_embd;
+                  * (active_cfg.n_head_kv * active_cfg.head_dim);
     let kv_k_buf = alloc_or_panic(kv_floats * 4) as ptr[f32];
     let kv_v_buf = alloc_or_panic(kv_floats * 4) as ptr[f32];
     let rope_len = active_cfg.head_dim / 2;
@@ -1255,7 +1265,7 @@ fn main() {
                         clear_kv_cache(kv_k_buf, kv_v_buf,
                                        active_cfg.n_layer,
                                        active_cfg.max_seq,
-                                       active_cfg.n_embd);
+                                       active_cfg.n_head_kv * active_cfg.head_dim);
                         if (forward_token_at_pos(fwd_model, fwd_cfg, 1, 0,
                                                  fwd_buf, activation_buf,
                                                  kv_k_buf, kv_v_buf,
@@ -1289,7 +1299,7 @@ fn main() {
                         clear_kv_cache(kv_k_buf, kv_v_buf,
                                        active_cfg.n_layer,
                                        active_cfg.max_seq,
-                                       active_cfg.n_embd);
+                                       active_cfg.n_head_kv * active_cfg.head_dim);
                         if (forward_token_at_pos(fp_m, fp_cfg, fp_tok, fp_pos,
                                                  fp_w, fp_a,
                                                  kv_k_buf, kv_v_buf,
@@ -1330,7 +1340,7 @@ fn main() {
                         let gen_a = activation_buf as ptr[f32];
                         clear_kv_cache(kv_k_buf, kv_v_buf,
                                    active_cfg.n_layer, active_cfg.max_seq,
-                                   active_cfg.n_embd);
+                                   active_cfg.n_head_kv * active_cfg.head_dim);
 
                         println("  generating 30 tokens (temp={gen_temp}, top_k={gen_k})...");
                         print("  [dbg: start] ");
@@ -1450,7 +1460,7 @@ fn main() {
                                 /* Clear KV */
                                 clear_kv_cache(kv_k_buf, kv_v_buf,
                                    active_cfg.n_layer, active_cfg.max_seq,
-                                   active_cfg.n_embd);
+                                   active_cfg.n_head_kv * active_cfg.head_dim);
                                 lp_rand_seed(ticks() + 1 as u32);
 
                                 /* Run forward on prompt tokens */
@@ -1506,7 +1516,7 @@ fn main() {
                 } else if (starts_with(text, "reset") && (text[5] == '\0' || text[5] == ' ')) {
                     clear_kv_cache(kv_k_buf, kv_v_buf,
                                    active_cfg.n_layer, active_cfg.max_seq,
-                                   active_cfg.n_embd);
+                                   active_cfg.n_head_kv * active_cfg.head_dim);
                     println("  kv cache reset");
                 } else if (starts_with(text, "reboot")) {
                     lp_reboot();
