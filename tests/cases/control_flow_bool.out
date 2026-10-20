@@ -1,0 +1,4 @@
+and/not ok
+eq ok
+ne ok
+loop = 3

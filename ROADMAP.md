@@ -4,7 +4,7 @@ Compiler and OS for edge AI inference, from 32-bit PCs to modern devices.
 
 ## Current status (October 2026)
 
-- **Compiler:** single IR pipeline (AST → IR → verify → C11); 88/88 compiler
+- **Compiler:** single IR pipeline (AST → IR → verify → C11); 102/102 compiler
   tests pass on scalar and SSE2, plus 13 IR-verifier and 12 conversion-policy
   unit tests.
 - **OS:** 32-bit Multiboot kernel, GRUB ISO, QEMU boot, and an interactive REPL.
@@ -40,8 +40,8 @@ compiler or standard-library code.
 
 ## 🏆 Major Milestones Achieved
 
-- **Compiler:** single IR pipeline, 88/88 tests passing on scalar and SSE2 plus
-  13 IR-verifier and 12 conversion-policy tests, emitting portable C11.
+- **Compiler:** single IR pipeline, 102/102 tests passing on scalar and SSE2
+  plus 13 IR-verifier and 12 conversion-policy tests, emitting portable C11.
 - **Bare-Metal AI:** a 15M-parameter TinyStories model on a 2008 Lenovo IdeaPad
   S9 (Intel Atom), with no OS, libc, or Python; reproducible in QEMU and as a
   GRUB ISO.
@@ -69,7 +69,12 @@ compiler or standard-library code.
 - [x] Malformed-IR verifier unit tests
 - [x] Conversion policy: lossy numeric and unsafe pointer warnings,
       constant-aware exactness, `--strict-types`, and unit tests
-- [x] `pyflakes`-clean compiler modules
+- [x] Bool-only `if`/`while`/logical conditions and unary `!`
+- [x] Comparison rules for numeric, bool, enum, and same-typed pointer values;
+      struct/string/array comparisons rejected
+- [x] Integer-only `for` loop bounds
+- [x] Language reference (`docs/LANGUAGE.md`)
+- [x] `pyflakes` step in CI and `pyflakes`-clean compiler modules
 - [ ] Remove the remaining commented AST-emitter code and update docstrings
 
 ## Phase 1 — Numeric core ✅
@@ -279,6 +284,8 @@ The original goal was 32-bit PCs *and* modern devices.
 
 - [ ] Integer-to-float conversions are permitted without a warning by policy;
       very wide integers can still lose precision
+- [ ] No definite-assignment analysis; all locals are zero-initialized, so
+      reading an uninitialized `var` is legal
 - [ ] Untyped array/vector literals still infer a common element type; two
       differently typed array variables cannot be converted element-wise
 - [ ] Compound assignment (`+=`, `-=`, etc.) parses but is not lowered
@@ -344,6 +351,12 @@ The original goal was 32-bit PCs *and* modern devices.
   pointer conversions warn with a source span; `--strict-types` turns them into
   errors. Integer-to-float and byte/void pointer views are allowed without a
   warning, and exact constants do not warn.
+- **Conditions are bool.** `if`, `while`, `&&`, `||`, and `!` require bool
+  operands; numeric or pointer conditions are rejected.
+- **Comparisons are explicit.** Numeric, bool, enum, and same-typed pointer
+  comparisons are allowed; struct, string, and array comparisons are rejected.
+- **Locals are zero-initialized.** There is no definite-assignment analysis;
+  uninitialized declarations read as zero.
 - **No libm.** All math is self-contained, enabling freestanding kernels.
   Generated code does not call libm; hosted programs use the host C library.
 - **Heap is dynamically initialized after the model.** Currently this is a

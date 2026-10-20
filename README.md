@@ -11,8 +11,8 @@ as a GRUB ISO.
 
 ## Status (as of October 2026)
 
-- **Compiler:** 88/88 regression tests pass with both the scalar and x86-64 SSE2
-  targets (`make test`, `make test-sse`), plus 13 IR-verifier and 12
+- **Compiler:** 102/102 regression tests pass with both the scalar and x86-64
+  SSE2 targets (`make test`, `make test-sse`), plus 13 IR-verifier and 12
   conversion-policy unit tests.
 - **Build:** 64-bit and 32-bit userland programs build; the freestanding 32-bit
   kernel builds; the GRUB ISO builds.
@@ -48,6 +48,10 @@ as a GRUB ISO.
   conversions warn by default. `--strict-types` turns them into errors.
   Integer-to-float conversions and byte/void pointer views are permitted
   without a warning.
+- **Control-flow and comparison typing:** `if`/`while` conditions and
+  `&&`/`||`/`!` require `bool`. Numeric, bool, enum, and same-typed pointer
+  comparisons are supported; struct, string, and array comparisons are rejected
+  with source-located errors.
 - **Hardware-oriented numerics:** `f16`, `bf16`, fixed-point `q7`/`q15`/`q31`,
   and SIMD vectors (`v2f64`, `v4f32`, `v4i32`, `v8i16`, `v16i8`). `f16`/`bf16`
   use native compiler types where available and portable fallbacks otherwise.
@@ -61,6 +65,13 @@ as a GRUB ISO.
   interrupts, and a live REPL.
 - **Verified target:** TinyStories-15M on a 2008 Lenovo IdeaPad S9 (Intel Atom),
   plus a reproducible QEMU/ISO path.
+
+## Documentation
+
+- [Language reference](docs/LANGUAGE.md) — syntax, types, aggregates,
+  conversions, control flow, and current gaps.
+- [Roadmap](ROADMAP.md) — status, history, and next work.
+- [Model notes](models/README.md) — expected TinyStories file and checksum.
 
 ## Requirements
 
@@ -121,6 +132,9 @@ Lepton/
 │   ├── test_conversions.py # Conversion-policy tests
 │   └── run_tests.py        # Test harness (make test)
 │
+├── docs/
+│   └── LANGUAGE.md         # Language reference
+│
 ├── tools/                  # Python utilities
 │   ├── gen_test_gguf.py    # Synthetic single-tensor GGUF for smoke tests
 │   ├── dump_dims.py        # Dump GGUF tensor dimensions
@@ -144,9 +158,9 @@ make test
 make test-sse
 ```
 
-Expected results: `make test` reports `88 passed, 0 failed`,
+Expected results: `make test` reports `102 passed, 0 failed`,
 `IR verifier: 13 tests passed`, and `Conversion policy: 12 tests passed`;
-`make test-sse` reports `88 passed, 0 failed`.
+`make test-sse` reports `102 passed, 0 failed`.
 
 ### 2. Build and run a userland program
 
@@ -246,6 +260,9 @@ These are the boundaries of the current implementation, not a wish list; see
   integers may lose precision), and byte/void pointer views are always
   allowed. Untyped array/vector literals still infer a common type; two
   differently typed array variables cannot be converted element-wise.
+- **Definite assignment.** All locals are zero-initialized; there is no
+  flow-sensitive definite-assignment analysis, so reading an uninitialized
+  `var` is legal and yields zero.
 - **Memory management.** The kernel uses a bump allocator with no `free` or
   reset. Commands that allocate per item (`vocab`, `encode`, `tensors`, token
   decoding) leak across REPL invocations, and not every `lp_alloc` result is
@@ -269,9 +286,9 @@ These are the boundaries of the current implementation, not a wish list; see
 ## Continuous integration
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on pushes and pull
-requests: scalar compiler tests, SSE2 tests, IR-verifier tests, conversion
-policy tests, 64-bit and 32-bit userland builds, and the freestanding kernel
-build. It does not run QEMU
+requests: pyflakes, scalar compiler tests, SSE2 tests, IR-verifier tests,
+conversion policy tests, 64-bit and 32-bit userland builds, and the freestanding
+kernel build. It does not run QEMU
 or inference, because the QEMU path requires a GGUF model that is not tracked in
 Git.
 

@@ -532,8 +532,9 @@ class Verifier:
         if isinstance(instr, IRCondJump):
             self.check_value(instr.cond, "condition")
             ct = instr.cond.type
-            if not (ct == BOOL or is_int(ct) or ct[0] in ('ptr', 'named')):
-                self.err(f"condition has type '{ts(ct)}'", instr.pos)
+            if ct != BOOL:
+                self.err(f"condition has type '{ts(ct)}', expected bool",
+                         instr.pos)
             if instr.then_target not in self.labels:
                 self.err(f"conditional jump to undefined block "
                          f"'{instr.then_target}'", instr.pos)
@@ -567,10 +568,36 @@ class Verifier:
             if out != BOOL:
                 self.err(f"comparison result has type '{ts(out)}', "
                          f"expected bool", instr.pos)
-            same = lt == rt
-            numeric = is_num(lt) and is_num(rt)
-            pointers = _is_pointer(lt) and _is_pointer(rt)
-            if not (same or numeric or pointers):
+            if is_vector(lt) or is_vector(rt):
+                self.err("vector comparison is not supported", instr.pos)
+            if is_array(lt) or is_array(rt):
+                self.err(f"cannot compare arrays '{ts(lt)}' and '{ts(rt)}'",
+                         instr.pos)
+            if lt == STR or rt == STR:
+                self.err("string comparison is not supported", instr.pos)
+            if lt == BOOL or rt == BOOL:
+                if lt != rt:
+                    self.err(f"cannot compare '{ts(lt)}' and '{ts(rt)}'",
+                             instr.pos)
+                if op not in ('==', '!='):
+                    self.err("bool values only support '==' and '!='",
+                             instr.pos)
+                return
+            if lt[0] == 'named' or rt[0] == 'named':
+                if lt != rt:
+                    self.err(f"cannot compare '{ts(lt)}' and '{ts(rt)}'",
+                             instr.pos)
+                if lt[1] in self.module.structs:
+                    self.err(f"cannot compare structs '{lt[1]}'", instr.pos)
+                if lt[1] in self.module.enums:
+                    return
+                self.err(f"cannot compare '{ts(lt)}'", instr.pos)
+            if lt[0] == 'ptr' or rt[0] == 'ptr':
+                if lt != rt:
+                    self.err(f"cannot compare different pointer types "
+                             f"'{ts(lt)}' and '{ts(rt)}'", instr.pos)
+                return
+            if not (is_num(lt) and is_num(rt)):
                 self.err(f"cannot compare '{ts(lt)}' and '{ts(rt)}'",
                          instr.pos)
             return
@@ -615,8 +642,9 @@ class Verifier:
             if not (is_num(ot) or is_vector(ot)):
                 self.err(f"unary '-' on '{ts(ot)}'", instr.pos)
         elif instr.op == '!':
-            if not (ot == BOOL or is_int(ot) or ot[0] in ('ptr', 'named')):
-                self.err(f"unary '!' on '{ts(ot)}'", instr.pos)
+            if ot != BOOL:
+                self.err(f"unary '!' requires a bool operand, got "
+                         f"'{ts(ot)}'", instr.pos)
         elif instr.op == '~':
             if not (is_int(ot) or is_quant(ot)):
                 self.err(f"unary '~' on '{ts(ot)}'", instr.pos)

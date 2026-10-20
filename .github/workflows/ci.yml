@@ -26,6 +26,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-multilib
 
+      - name: Lint compiler modules
+        run: |
+          python3 -m pip install --disable-pip-version-check pyflakes==3.2.0
+          python3 -m pyflakes lepton_*.py leptonc.py \
+            tests/test_ir_verify.py tests/test_conversions.py
+
       - name: Compiler tests (scalar)
         run: make test
 

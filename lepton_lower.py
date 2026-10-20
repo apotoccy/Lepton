@@ -540,10 +540,56 @@ class Lowering:
                  f"in {context}", pos)
 
     # -- expressions ---------------------------------------------------------
+    def lower_condition(self, e, what):
+        v = self.lower_expr(e)
+        if v is None:
+            self.err(f"{what} condition has no value", e.pos)
+        if v.type != ('prim', 'bool'):
+            self.err(f"{what} condition must be bool, got '{ts(v.type)}'; "
+                     f"use a comparison", e.pos)
+        return v
+
+    def check_comparable(self, l, r, op, pos):
+        lt, rt = l.type, r.type
+        if is_vector(lt) or is_vector(rt):
+            self.err("vector comparison not supported; use element access "
+                     "or a reduction", pos)
+        if is_array(lt) or is_array(rt):
+            self.err(f"cannot compare arrays '{ts(lt)}' and '{ts(rt)}'", pos)
+        if lt == ('prim', 'str') or rt == ('prim', 'str'):
+            self.err("string comparison is not supported; compare characters "
+                     "or lengths explicitly", pos)
+        if lt == ('prim', 'bool') or rt == ('prim', 'bool'):
+            if lt != rt:
+                self.err(f"cannot compare '{ts(lt)}' and '{ts(rt)}'", pos)
+            if op not in ('==', '!='):
+                self.err("bool values only support '==' and '!='", pos)
+            return
+        if lt[0] == 'named' or rt[0] == 'named':
+            if lt != rt:
+                self.err(f"cannot compare '{ts(lt)}' and '{ts(rt)}'", pos)
+            if lt[1] in self.module.structs:
+                self.err(f"cannot compare structs; compare fields of "
+                         f"'{lt[1]}' explicitly", pos)
+            if lt[1] in self.module.enums:
+                return
+            self.err(f"cannot compare '{ts(lt)}'", pos)
+        if lt[0] == 'ptr' or rt[0] == 'ptr':
+            if lt != rt:
+                self.err(f"cannot compare different pointer types "
+                         f"'{ts(lt)}' and '{ts(rt)}'", pos)
+            return
+        if is_num(lt) and is_num(rt):
+            return
+        self.err(f"cannot compare '{ts(lt)}' and '{ts(rt)}'", pos)
+
     def lower_logical(self, e, is_and):
         l = self.lower_expr(e.left)
         if l is None:
             self.err(f"'{e.op}' needs value operands", e.pos)
+        if l.type != ('prim', 'bool'):
+            self.err(f"'{e.op}' operands must be bool, got '{ts(l.type)}'",
+                     e.pos)
 
         # A fresh C-visible local to hold the result. The name comes from
         # the label counter so it is unique per function.
@@ -568,6 +614,9 @@ class Lowering:
         r = self.lower_expr(e.right)
         if r is None:
             self.err(f"'{e.op}' needs value operands", e.pos)
+        if r.type != ('prim', 'bool'):
+            self.err(f"'{e.op}' operands must be bool, got '{ts(r.type)}'",
+                     e.pos)
         self.block.add(IRAssign(dst_name, r, e.pos))
         self.block.add(IRJump(merge_lbl, e.pos))
 
@@ -579,9 +628,7 @@ class Lowering:
         return IRLocal(dst_name, ('prim', 'bool'))
     
     def lower_if(self, s):
-        cond = self.lower_expr(s.cond)
-        if cond is None:
-            self.err("if condition has no value", s.pos)
+        cond = self.lower_condition(s.cond, "if")
 
         then_lbl  = self.func.new_label("then")
         merge_lbl = self.func.new_label("merge")
@@ -611,6 +658,12 @@ class Lowering:
         hi = self.lower_expr(s.hi)
         if hi is None:
             self.err("for loop upper bound has no value", s.pos)
+        if not is_int(lo.type):
+            self.err(f"for loop lower bound must be an integer, got "
+                     f"'{ts(lo.type)}'", s.pos)
+        if not is_int(hi.type):
+            self.err(f"for loop upper bound must be an integer, got "
+                     f"'{ts(hi.type)}'", s.pos)
 
         loop_cname = self.declare(s.var, lo.type)
         self.block.add(IRBind(loop_cname, lo, lo.type, True, s.pos))
@@ -663,9 +716,7 @@ class Lowering:
         self.block.add(IRJump(head_lbl, s.pos))
 
         self.block = self.func.add_block(head_lbl, s.pos)
-        cond = self.lower_expr(s.cond)
-        if cond is None:
-            self.err("while condition has no value", s.pos)
+        cond = self.lower_condition(s.cond, "while")
         self.block.add(IRCondJump(cond, body_lbl, end_lbl, s.pos))
 
         self.block = self.func.add_block(body_lbl, s.pos)
@@ -746,29 +797,15 @@ class Lowering:
             if e.op in ('+', '-') and (l.type[0] == 'ptr' or r.type[0] == 'ptr'):
                 return self.lower_ptr_arith(e, l, r)
 
-            # Vector comparison is not an elementwise C operator. Users
-            # get element access or a reduction instead.
             if e.op in ('==', '!=', '<', '<=', '>', '>='):
-                if is_vector(l.type) or is_vector(r.type):
-                    self.err("vector comparison not supported; "
-                             "use element access or a reduction", e.pos)
-
-            # Broadcast a scalar operand to match a vector operand.
-            if is_vector(l.type) and not is_vector(r.type):
-                r = self.broadcast(r, l.type, e.pos)
-            elif is_vector(r.type) and not is_vector(l.type):
-                l = self.broadcast(l, r.type, e.pos)
-
-            if e.op in ('==', '!='):
-                self.common_type(l.type, r.type, e.pos)
-                t = ('prim', 'bool')
-            elif e.op in ('<', '<=', '>', '>='):
-                ct = self.common_type(l.type, r.type, e.pos)
-                if not is_num(ct) and ct[0] != 'ptr':
-                    self.err(f"cannot order '{ts(l.type)}' and "
-                             f"'{ts(r.type)}'", e.pos)
+                self.check_comparable(l, r, e.op, e.pos)
                 t = ('prim', 'bool')
             else:
+                # Broadcast a scalar operand to match a vector operand.
+                if is_vector(l.type) and not is_vector(r.type):
+                    r = self.broadcast(r, l.type, e.pos)
+                elif is_vector(r.type) and not is_vector(l.type):
+                    l = self.broadcast(l, r.type, e.pos)
                 t = self.common_type(l.type, r.type, e.pos)
             dst = self.func.new_temp(t)
             self.block.add(IRBinOp(dst, e.op, l, r, t, e.pos))
@@ -780,6 +817,13 @@ class Lowering:
             v = self.lower_expr(e.expr)
             if v is None:
                 self.err(f"'{e.op}' needs a value operand", e.pos)
+            if e.op == '!':
+                if v.type != ('prim', 'bool'):
+                    self.err(f"'!' requires a bool operand, got "
+                             f"'{ts(v.type)}'", e.pos)
+                dst = self.func.new_temp(('prim', 'bool'))
+                self.block.add(IRUnOp(dst, '!', v, ('prim', 'bool'), e.pos))
+                return dst
             dst = self.func.new_temp(v.type)
             self.block.add(IRUnOp(dst, e.op, v, v.type, e.pos))
             return dst
