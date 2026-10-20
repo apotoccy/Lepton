@@ -2,6 +2,7 @@ import "std/nn/matmul.lp";
 import "std/gguf/kv.lp";
 import "std/gguf/tensor.lp";
 import "std/gguf/dequant.lp";
+import "std/gguf/config.lp";
 
 extern fn serial_init() -> void;
 extern fn vga_init() -> void;
@@ -106,45 +107,6 @@ fn print_token(s: str) -> void {
     }
 }
 
-fn name_match(buf: ptr[u8], off: i64, len: u64, target: str) -> bool {
-    var i: i64 = 0;
-    while (i < (len as i64)) {
-        if (read_u8(buf, off + i) != target[i] as u8) {
-            return false;
-        }
-        i = i + 1;
-    }
-    return target[i] == '\0';
-}
-
-fn find_tensor_index(model: ptr[u8], first_off: i64, count: u64, name: str) -> i64 {
-    var walk: i64 = first_off;
-    var k: i64 = 0;
-    while (k < (count as i64)) {
-        let nlen = read_u64(model, walk);
-        let nstart = walk + 8;
-        if (name_match(model, nstart, nlen, name)) {
-            return k;
-        }
-        let ndims = read_u32(model, nstart + (nlen as i64));
-        walk = nstart + (nlen as i64) + 4 + 8 * (ndims as i64) + 4 + 8;
-        k = k + 1;
-    }
-    return -1;
-}
-
-fn tensor_by_name(model: ptr[u8], first_off: i64, count: u64, name: str) -> GGUFTensorInfo {
-    let idx = find_tensor_index(model, first_off, count, name);
-    if (idx < 0) {
-        return GGUFTensorInfo(
-            name_offset: 0, name_len: 0, n_dims: 0,
-            dim0: 0, dim1: 0, dim2: 0, dim3: 0,
-            ggml_type: 0, data_offset: 0,
-        );
-    }
-    return find_tensor_by_index(model, first_off, idx as u64);
-}
-
 fn model_data_start(model: ptr[u8]) -> i64 {
     let tc = read_u64(model, 8);
     let kc = read_u64(model, 16);
@@ -158,6 +120,40 @@ fn model_data_start(model: ptr[u8]) -> i64 {
         mds = mds + (32 - rem);
     }
     return mds;
+}
+
+fn model_config(model: ptr[u8]) -> ModelConfig {
+    let kv_count = read_u64(model, 16);
+    let tensor_table = skip_kv_block(model, 24, kv_count);
+    return load_model_config(model, tensor_table);
+}
+
+/* The compiled inference path still uses fixed TinyStories-15M buffers and
+   attention indexing. Reject other architectures instead of silently
+   producing wrong output. */
+fn config_supported(cfg: ModelConfig) -> bool {
+    if (cfg.n_embd != 288) { return false; }
+    if (cfg.n_ff != 768) { return false; }
+    if (cfg.n_layer != 6) { return false; }
+    if (cfg.n_head != 6) { return false; }
+    if (cfg.n_head_kv != cfg.n_head) { return false; }  /* no GQA yet */
+    if (cfg.head_dim != 48) { return false; }
+    if (cfg.vocab_size != 32000) { return false; }
+    if (cfg.max_seq <= 0 || cfg.max_seq > 256) { return false; }
+    if (cfg.rms_eps <= 0.0f) { return false; }
+    return true;
+}
+
+fn print_model_config(cfg: ModelConfig) -> void {
+    println("  n_embd    = {cfg.n_embd}");
+    println("  n_ff      = {cfg.n_ff}");
+    println("  n_layer   = {cfg.n_layer}");
+    println("  n_head    = {cfg.n_head}");
+    println("  n_head_kv = {cfg.n_head_kv}");
+    println("  head_dim  = {cfg.head_dim}");
+    println("  max_seq   = {cfg.max_seq}");
+    println("  vocab     = {cfg.vocab_size}");
+    println("  rms_eps   = {cfg.rms_eps}");
 }
 
 fn dequant_row_q4_0(model: ptr[u8], data_start: i64,
@@ -186,13 +182,14 @@ fn copy_f32_tensor(model: ptr[u8], data_start: i64,
     }
 }
 
-fn rmsnorm_n(x: ptr[f32], w: ptr[f32], out: ptr[f32], n: i64) -> void {
+fn rmsnorm_n(x: ptr[f32], w: ptr[f32], out: ptr[f32], n: i64,
+              eps: f32) -> void {
     var ss: f32 = 0.0f;
     for i in 0..n {
         ss = ss + x[i] * x[i];
     }
     let ms = ss / (n as f32);
-    let inv = rsqrt(ms + 1e-5f);
+    let inv = rsqrt(ms + eps);
     for i in 0..n {
         out[i] = x[i] * inv * w[i];
     }
@@ -262,13 +259,17 @@ fn forward_token(model: ptr[u8], token: i64, n_layer: i64,
                  wbuf: ptr[f32], act: ptr[f32],
                  out_token: ptr[u32],
                  trace: bool) -> void {
+    let cfg = model_config(model);
+    if (!config_supported(cfg)) {
+        panic("unsupported model architecture: this build supports TinyStories-15M");
+    }
     let data_start = model_data_start(model);
     let tc = read_u64(model, 8);
     let kc = read_u64(model, 16);
     let tstart = skip_kv_block(model, 24, kc);
 
-    let n_embd: i64 = 288;
-    let n_ff: i64   = 768;
+    let n_embd: i64 = cfg.n_embd;
+    let n_ff: i64   = cfg.n_ff;
 
     /* Act buffer layout — all f32, offsets in floats.
        [0..288]        hidden
@@ -301,7 +302,7 @@ fn forward_token(model: ptr[u8], token: i64, n_layer: i64,
         let an_name = "blk.{layer}.attn_norm.weight";
         let an_t = tensor_by_name(model, tstart, tc, an_name);
         copy_f32_tensor(model, data_start, an_t, wbuf);
-        rmsnorm_n(hidden, wbuf, normed, n_embd);
+        rmsnorm_n(hidden, wbuf, normed, n_embd, cfg.rms_eps);
 
         /* 2b. V = attn_v @ normed */
         let av_name = "blk.{layer}.attn_v.weight";
@@ -327,7 +328,7 @@ fn forward_token(model: ptr[u8], token: i64, n_layer: i64,
         let fn_name = "blk.{layer}.ffn_norm.weight";
         let fn_t = tensor_by_name(model, tstart, tc, fn_name);
         copy_f32_tensor(model, data_start, fn_t, wbuf);
-        rmsnorm_n(hidden, wbuf, normed, n_embd);
+        rmsnorm_n(hidden, wbuf, normed, n_embd, cfg.rms_eps);
 
         /* 2f. gate = ffn_gate @ normed */
         let fg_name = "blk.{layer}.ffn_gate.weight";
@@ -367,7 +368,7 @@ fn forward_token(model: ptr[u8], token: i64, n_layer: i64,
     /* 3. Final RMSNorm */
     let onf_t = tensor_by_name(model, tstart, tc, "output_norm.weight");
     copy_f32_tensor(model, data_start, onf_t, wbuf);
-    rmsnorm_n(hidden, wbuf, normed, n_embd);
+    rmsnorm_n(hidden, wbuf, normed, n_embd, cfg.rms_eps);
 
     /* 4. Output projection, per-vocab-row dequant, argmax.
        output.weight can be type=2 (Q4_0) or type=8 (Q8_0); handle both. */
@@ -397,20 +398,29 @@ fn forward_token(model: ptr[u8], token: i64, n_layer: i64,
     out_token[0] = best_t;
 }
 
-fn forward_token_at_pos(model: ptr[u8], token: i64, pos: i64,
-                        n_layer: i64, n_head: i64, head_dim: i64,
+fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
+                        token: i64, pos: i64,
                         wbuf: ptr[f32], act: ptr[f32],
                         kv_k: ptr[f32], kv_v: ptr[f32],
                         freqs: ptr[f64],
                         logits: ptr[f32]) -> void {
+    if (!config_supported(cfg)) {
+        panic("unsupported model architecture: this build supports TinyStories-15M");
+    }
+    if (pos < 0 || pos >= cfg.max_seq || pos >= 256) {
+        panic("context position out of range");
+    }
     let data_start = model_data_start(model);
     let tc = read_u64(model, 8);
     let kc = read_u64(model, 16);
     let tstart = skip_kv_block(model, 24, kc);
 
-    let n_embd: i64 = 288;
-    let n_ff:   i64 = 768;
+    let n_embd: i64 = cfg.n_embd;
+    let n_ff:   i64 = cfg.n_ff;
     let max_seq: i64 = 256;
+    let n_layer: i64 = cfg.n_layer;
+    let n_head: i64 = cfg.n_head;
+    let head_dim: i64 = cfg.head_dim;
 
     let hidden    = act;
     let normed    = act + 288;
@@ -436,7 +446,7 @@ fn forward_token_at_pos(model: ptr[u8], token: i64, pos: i64,
         /* RMSNorm 1 */
         let an_t = tensor_by_name(model, tstart, tc, "blk.{layer}.attn_norm.weight");
         copy_f32_tensor(model, data_start, an_t, wbuf);
-        rmsnorm_n(hidden, wbuf, normed, n_embd);
+        rmsnorm_n(hidden, wbuf, normed, n_embd, cfg.rms_eps);
 
         /* Q, K, V */
         let aq_t = tensor_by_name(model, tstart, tc, "blk.{layer}.attn_q.weight");
@@ -497,7 +507,7 @@ fn forward_token_at_pos(model: ptr[u8], token: i64, pos: i64,
         /* RMSNorm 2 */
         let fn_t = tensor_by_name(model, tstart, tc, "blk.{layer}.ffn_norm.weight");
         copy_f32_tensor(model, data_start, fn_t, wbuf);
-        rmsnorm_n(hidden, wbuf, normed, n_embd);
+        rmsnorm_n(hidden, wbuf, normed, n_embd, cfg.rms_eps);
 
         /* FFN */
         let fg_t = tensor_by_name(model, tstart, tc, "blk.{layer}.ffn_gate.weight");
@@ -524,7 +534,7 @@ fn forward_token_at_pos(model: ptr[u8], token: i64, pos: i64,
     /* Final RMSNorm */
     let onf_t = tensor_by_name(model, tstart, tc, "output_norm.weight");
     copy_f32_tensor(model, data_start, onf_t, wbuf);
-    rmsnorm_n(hidden, wbuf, final_n, n_embd);
+    rmsnorm_n(hidden, wbuf, final_n, n_embd, cfg.rms_eps);
 
     /* Output projection: fill logits[vocab] with raw scores */
     let ow_t = tensor_by_name(model, tstart, tc, "output.weight");
@@ -1216,15 +1226,13 @@ fn main() {
                         println("  no module loaded");
                     } else {
                         let cm = mb_module_start(0 as u32) as ptr[u8];
-                        let ckc = read_u64(cm, 16);
-                        let e1 = find_kv(cm, 24, ckc, "llama.embedding_length");
-                        let e2 = find_kv(cm, 24, ckc, "llama.attention.head_count");
-                        let e3 = find_kv(cm, 24, ckc, "llama.block_count");
-                        let e4 = find_kv(cm, 24, ckc, "llama.feed_forward_length");
-                        if (e1 >= 0) { println("  n_embd  = {read_u32(cm, e1)}"); }
-                        if (e2 >= 0) { println("  n_head  = {read_u32(cm, e2)}"); }
-                        if (e3 >= 0) { println("  n_layer = {read_u32(cm, e3)}"); }
-                        if (e4 >= 0) { println("  n_ff    = {read_u32(cm, e4)}"); }
+                        let cfg = model_config(cm);
+                        print_model_config(cfg);
+                        if (config_supported(cfg)) {
+                            println("  inference = supported");
+                        } else {
+                            println("  inference = unsupported by this build");
+                        }
                     }
                 } else if (starts_with(text, "tensors") && (text[7] == '\0' || text[7] == ' ')) {
                     if (mb_module_count() == 0 as u32) {
@@ -1319,11 +1327,12 @@ fn main() {
                         let fp_end = parse_int_end(text, 6);
                         let fp_tok = parse_int_at(text, fp_end);
                         let fp_m = mb_module_start(0 as u32) as ptr[u8];
+                        let fp_cfg = model_config(fp_m);
                         let fp_w = scratch_bytes as ptr[f32];
                         let fp_a = activation_buf as ptr[f32];
                         clear_kv_cache(kv_k_buf, kv_v_buf);
-                        forward_token_at_pos(fp_m, fp_tok, fp_pos,
-                                             6, 6, 48, fp_w, fp_a,
+                        forward_token_at_pos(fp_m, fp_cfg, fp_tok, fp_pos,
+                                             fp_w, fp_a,
                                              kv_k_buf, kv_v_buf, rope_freqs,
                                              logits_buf);
                         let fp_best = lp_argmax(logits_buf, 32000 as i32);
@@ -1352,6 +1361,7 @@ fn main() {
                         }
                         lp_rand_seed(ticks() + 1 as u32);
                         let gen_m = mb_module_start(0 as u32) as ptr[u8];
+                        let gen_cfg = model_config(gen_m);
 
                         println("  Model starts at RAM address: {mb_module_start(0 as u32)}");
 
@@ -1364,8 +1374,9 @@ fn main() {
 
                         var cur: u32 = 1 as u32;
                         for step in 0..30 {
-                            forward_token_at_pos(gen_m, cur as i64, step,
-                                                 6, 6, 48, gen_w, gen_a,
+                            if (step >= gen_cfg.max_seq) { break; }
+                            forward_token_at_pos(gen_m, gen_cfg, cur as i64, step,
+                                                 gen_w, gen_a,
                                                  kv_k_buf, kv_v_buf, rope_freqs,
                                                  logits_buf);
                             cur = lp_sample(logits_buf, 32000 as i32,
@@ -1444,6 +1455,7 @@ fn main() {
                                 if (gp_kval > 0) { gp_k = gp_kval; }
                                 if (gp_t <= 0.0) { gp_t = 1.0; }
                                 let gp_m = mb_module_start(0 as u32) as ptr[u8];
+                                let gp_cfg = model_config(gp_m);
                                 let gp_w = scratch_bytes as ptr[f32];
                                 let gp_a = activation_buf as ptr[f32];
                                 let gp_ids = alloc([u32; 256]) as ptr[u32];
@@ -1456,6 +1468,9 @@ fn main() {
                                                        merge_table, merge_count,
                                                        gp_buf, 0 as i64, gp_i,
                                                        gp_ids);
+                                if (gp_len > gp_cfg.max_seq) {
+                                    panic("prompt exceeds model context length");
+                                }
                                 println("  prompt = {gp_len} tokens");
                                 /* Echo back what we decoded, to check roundtrip */
                                 print("  enc: ");
@@ -1473,8 +1488,9 @@ fn main() {
                                 /* Run forward on prompt tokens */
                                 var gp_pos: i64 = 0;
                                 while (gp_pos < gp_len) {
-                                    forward_token_at_pos(gp_m, gp_ids[gp_pos] as i64, gp_pos,
-                                                         6, 6, 48, gp_w, gp_a,
+                                    forward_token_at_pos(gp_m, gp_cfg,
+                                                         gp_ids[gp_pos] as i64, gp_pos,
+                                                         gp_w, gp_a,
                                                          kv_k_buf, kv_v_buf, rope_freqs,
                                                          logits_buf);
                                     gp_pos = gp_pos + 1;
@@ -1490,8 +1506,10 @@ fn main() {
 
                                 var gp_g: i64 = 1;
                                 while (gp_g < 30) {
-                                    forward_token_at_pos(gp_m, gp_next as i64, gp_pos,
-                                                         6, 6, 48, gp_w, gp_a,
+                                    if (gp_pos >= gp_cfg.max_seq) { break; }
+                                    forward_token_at_pos(gp_m, gp_cfg,
+                                                         gp_next as i64, gp_pos,
+                                                         gp_w, gp_a,
                                                          kv_k_buf, kv_v_buf, rope_freqs,
                                                          logits_buf);
                                     gp_next = lp_sample(logits_buf, 32000 as i32,

@@ -84,6 +84,48 @@ fn find_tensor_by_index(buf: ptr[u8], first_offset: i64,
     return parse_tensor_info(buf, o);
 }
 
+fn tensor_name_match(buf: ptr[u8], off: i64, len: u64,
+                     target: str) -> bool {
+    var i: i64 = 0;
+    while (i < (len as i64)) {
+        if (read_u8(buf, off + i) != target[i] as u8) {
+            return false;
+        }
+        i = i + 1;
+    }
+    return target[i] == '\0';
+}
+
+fn find_tensor_index(buf: ptr[u8], first_off: i64, count: u64,
+                     name: str) -> i64 {
+    var walk: i64 = first_off;
+    var k: i64 = 0;
+    while (k < (count as i64)) {
+        let nlen = read_u64(buf, walk);
+        let nstart = walk + 8;
+        if (tensor_name_match(buf, nstart, nlen, name)) {
+            return k;
+        }
+        let ndims = read_u32(buf, nstart + (nlen as i64));
+        walk = nstart + (nlen as i64) + 4 + 8 * (ndims as i64) + 4 + 8;
+        k = k + 1;
+    }
+    return -1;
+}
+
+fn tensor_by_name(buf: ptr[u8], first_off: i64, count: u64,
+                  name: str) -> GGUFTensorInfo {
+    let idx = find_tensor_index(buf, first_off, count, name);
+    if (idx < 0) {
+        return GGUFTensorInfo(
+            name_offset: 0, name_len: 0, n_dims: 0,
+            dim0: 0, dim1: 0, dim2: 0, dim3: 0,
+            ggml_type: 0, data_offset: 0,
+        );
+    }
+    return find_tensor_by_index(buf, first_off, idx as u64);
+}
+
 fn tensor_element_count(t: GGUFTensorInfo) -> u64 {
     return t.dim0 * t.dim1 * t.dim2 * t.dim3;
 }

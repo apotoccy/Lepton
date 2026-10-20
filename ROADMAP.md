@@ -158,7 +158,9 @@ Dequantization & Math:
 - [x] Q8_0 dequantization (34-byte blocks, 32 elements)
 - [x] Full Llama forward pass for the TinyStories-15M shape (288 embedding
       width, 6 layers, 6 heads, 48 head dim, 768 FFN, 32k vocab); the shape is
-      hardcoded and a config-driven runtime is the next major step
+      hardcoded, but GGUF configuration is now parsed and validated
+- [x] `ModelConfig` parsing (`std/gguf/config.lp`) and shape validation
+- [x] Context guard against the configured `max_seq` (256-position cache cap)
 - [x] Q, K, V matvecs, RoPE, multi-head attention, softmax, KV cache
 - [x] RMSNorm, SwiGLU MLP (inline in kernel)
 
@@ -205,7 +207,8 @@ Kernel Features:
 - [x] Heap placed after the loaded module with a fixed 64 MB reservation
 - [ ] Multiboot memory-map validation and dynamic heap sizing
 - [x] Real hardware test (Lenovo IdeaPad S9, 2008 Intel Atom)
-- [ ] Context-length guard and config-driven KV/logits/token-table sizing
+- [x] Context-length guard from GGUF metadata
+- [ ] Config-driven KV/logits/token-table sizing
 - [ ] Split `kernel.lp` into `repl.lp`, `tokenizer.lp`, `infer.lp`, and
       `model.lp` modules
 
@@ -246,11 +249,12 @@ tensors, not the 15M model label.
 
 ### 2. Model support: config-driven runtime first, then modern quantization
 
-- [ ] Build a `ModelConfig` from GGUF metadata: `embedding_length`,
+- [x] Build a `ModelConfig` from GGUF metadata: `embedding_length`,
       `feed_forward_length`, `attention.head_count`, `block_count`,
       `rope.dimension_count`, `context_length`, `layer_norm_rms_epsilon`
-- [ ] Validate tensor dimensions and types at load; derive `head_dim`, vocab,
-      and `max_seq`
+- [x] Derive `head_dim`/vocabulary and validate the supported shape; reject
+      unsupported shapes and GQA instead of running with wrong dimensions
+- [ ] Validate tensor dimensions and types at load
 - [ ] Remove the hardcoded 288/768/6/48/32000/256 constants from the kernel
 - [ ] Add grouped-query attention (`n_head_kv`)
 - [ ] Add Q4_K/Q5_K/Q6_K dequantization or, preferably, quantized dot products
@@ -312,10 +316,9 @@ The original goal was 32-bit PCs *and* modern devices.
 
 **Kernel and OS**
 
-- [ ] Inference is hardcoded to the TinyStories-15M shape; other Llama-family
-      sizes require source changes
-- [ ] The model declares `context_length=128`, the kernel reserves 256
-      positions, and no position bound is enforced yet
+- [ ] Inference is still hardcoded to the TinyStories-15M shape; GGUF config is
+      parsed and unsupported shapes are rejected, but dynamic inference/GQA
+      remain future work
 - [ ] `lp_alloc` null returns are not checked everywhere; `free` remains a
       no-op in the bump allocator
 - [ ] `lp_alloc_init` is declared as `(ptr[u8], i64)` in Lepton but defined as

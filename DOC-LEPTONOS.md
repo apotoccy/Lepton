@@ -23,8 +23,8 @@ see [ROADMAP.md](ROADMAP.md).
   predicts token **9038** (`Once`), matching the Python reference.
 - Tokenizer: `encode Once upon a time` returns `[9038, 2501, 263, 931]`.
 - Scope: the inference path is specialized to the TinyStories-15M shape and
-  Q4_0/Q8_0 weights. GGUF metadata is not yet used to configure the model
-  automatically.
+  Q4_0/Q8_0 weights. GGUF metadata is parsed and validated; unsupported shapes
+  (including GQA) are rejected, and dynamic inference remains future work.
 
 ## 1. Architecture
 
@@ -78,8 +78,9 @@ line editing.
 ### Inspection
 
 - `info` — GGUF version, tensor count, and KV count.
-- `config` — model hyperparameters (`n_embd`, `n_head`, `n_layer`, `n_ff`).
-  These are currently hardcoded, not read from GGUF metadata.
+- `config` — model hyperparameters parsed from GGUF metadata (`n_embd`,
+  `n_ff`, layers, heads, KV heads, head dimension, context length, vocabulary,
+  RMS epsilon), plus whether this build supports the shape.
 - `tensors` — tensor names, dimensions, and quantization types.
 - `modules` — physical addresses and sizes of loaded Multiboot modules.
 - `matvec` — diagnostic matrix-vector multiplication on the first tensor.
@@ -149,11 +150,13 @@ with GRUB installed and `kernel.elf` plus the model in `/boot` also works.
 ## 6. Limitations
 
 - **One model shape.** `n_embd=288`, `n_ff=768`, `n_layer=6`, `n_head=6`,
-  `head_dim=48`, vocab 32000, and a 256-position KV cache are hardcoded.
+  `head_dim=48`, vocab 32000, and a 256-position KV cache are still required by
+  the compiled inference and buffer layout. GGUF metadata is parsed and
+  unsupported shapes are rejected.
 - **One quantization set.** Q4_0, Q8_0, and F32 norms only; Q4_K/Q5_K/Q6_K and
-  grouped-query attention are not implemented.
-- **Context safety.** The model declares a 128-token context but the kernel
-  reserves 256 positions and does not yet enforce the bound.
+  grouped-query attention are not implemented. GQA configurations are rejected.
+- **Context safety.** The configured `max_seq` is enforced by the forward guard
+  and generation loops; the KV cache is still allocated for 256 positions.
 - **Memory.** `free` is a no-op in the freestanding bump allocator. The REPL
   marks the heap before each command and releases transient allocations after
   it; `alloc_reset()` reclaims the whole heap but invalidates long-lived

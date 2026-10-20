@@ -216,8 +216,9 @@ include:
 - tokenizer: `vocab`, `decodetok`, `encode`;
 - generation: `generate`, `genprompt`, `fwdpos`, `forward`.
 
-`config` currently prints hardcoded TinyStories-15M hyperparameters; GGUF
-metadata does not drive the inference path yet.
+`config` parses and prints GGUF hyperparameters and reports whether the
+compiled inference path supports the shape. The path remains specialized to
+TinyStories-15M; unsupported shapes (including GQA) are rejected.
 
 ## 6. Build and test
 
@@ -241,9 +242,10 @@ ISO to a device and requires `sudo`; verify the device name first.
 ## 7. Current limitations
 
 - **One model shape.** `n_embd=288`, `n_ff=768`, `n_layer=6`, `n_head=6`,
-  `head_dim=48`, vocab 32000, and a 256-position KV cache are hardcoded.
-- **Context safety.** The model declares a 128-token context but the kernel
-  reserves 256 positions and does not enforce the bound.
+  `head_dim=48`, vocab 32000, and a 256-position KV cache are still required by
+  the compiled inference path; GGUF config is parsed and validated.
+- **Context safety.** The configured `max_seq` is enforced by the forward guard
+  and generation loops; the KV cache is still allocated for 256 positions.
 - **Quantization coverage.** Q4_0/Q8_0/F32 only; no K-quants or GQA.
 - **Memory.** The bump allocator cannot reclaim individual blocks. Mark/release
   and `alloc_reset` invalidate allocations after their reset point, and

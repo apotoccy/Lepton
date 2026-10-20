@@ -77,6 +77,12 @@ as a GRUB ISO.
 - **Explicit array casts:** `as` converts arrays with the same length and
   numeric or pointer element types element by element, including `f16`/`bf16`
   and quantized conversions. There are no implicit array conversions.
+- **GGUF configuration:** the kernel parses `ModelConfig` from GGUF metadata
+  (embedding/FFN widths, layers, heads, KV heads, RoPE dimension, context
+  length, vocabulary, and RMS epsilon), validates the shape, displays it via
+  `config`, and enforces the configured context bound. Inference remains
+  specialized to the TinyStories-15M shape for now; unsupported shapes,
+  including GQA, are rejected rather than run with wrong dimensions.
 - **Allocator control:** `free(ptr)` releases a hosted allocation;
   `alloc_reset()` reclaims the whole freestanding bump heap;
   `alloc_mark()`/`alloc_release(mark)` reclaim transient allocations. The kernel
@@ -151,7 +157,8 @@ Lepton/
 │   ├── gguf/
 │   │   ├── header.lp       # GGUF header parsing
 │   │   ├── kv.lp           # Metadata key-value parsing
-│   │   ├── tensor.lp       # Tensor table parsing
+│   │   ├── tensor.lp       # Tensor table parsing and lookup
+│   │   ├── config.lp       # ModelConfig from GGUF metadata
 │   │   ├── dequant.lp      # Q4_0 and Q8_0 dequantization
 │   │   └── model.lp        # Whole-file loader (16 MB buffer cap)
 │   └── nn/
@@ -279,15 +286,14 @@ transformer layers (5.97M). The memory/performance arithmetic in
 These are the boundaries of the current implementation, not a wish list; see
 [ROADMAP.md](ROADMAP.md) for the work planned against them.
 
-- **One model shape.** The kernel hardcodes `n_embd=288`, `n_ff=768`,
-  `n_layer=6`, `n_head=6`, `head_dim=48`, vocab 32000, and a 256-position KV
-  cache. Only Q4_0/Q8_0 weights and F32 norms are handled. Other Llama-family
-  sizes require source changes; the GGUF metadata is not yet used to configure
-  the inference path.
-- **Context safety.** The model metadata declares `context_length=128`, while
-  the kernel reserves 256 positions, and it does not yet check prompt or
-  generation positions against the cache. Stay within the cache until the
-  bound is enforced.
+- **One model shape.** Inference still hardcodes `n_embd=288`, `n_ff=768`,
+  `n_layer=6`, `n_head=6`, `head_dim=48`, and a 32000-entry logits/token table.
+  GGUF metadata is parsed and validated, and unsupported shapes are rejected;
+  dynamic buffers, dynamic inference, and GQA remain future work. Only
+  Q4_0/Q8_0 weights and F32 norms are handled.
+- **Context safety.** The configured `max_seq` is enforced by the forward guard
+  and generation loops, with a hard cap of 256 KV positions. The KV cache is
+  still allocated for 256 positions.
 - **Conversion policy.** Lossy numeric conversions and unsafe pointer
   conversions warn by default; `--strict-types` makes them errors. Explicit
   `as` casts never warn. Integer-to-float is allowed without warning (wide
