@@ -1,12 +1,11 @@
 # Changelog
 
-## v0.2.2 — 2026-10-21
+## v0.3.1 — 2026-10-21
 
-- PS/2 keyboard controller initialization and polling fallback for the S9.
-- ACPI poweroff now reads `_S5` from the DSDT and uses the FADT SMI/PM1
-  fields instead of treating PM1 lengths as sleep types.
+- Fixed REPL backspace echo: `\b` is not a Lepton string escape, so the raw
+  backspace character is emitted directly instead of printing `b b`.
 
-## Unreleased — v0.3.0
+## v0.3.0 — 2026-10-21
 
 - PS/2 keyboard is explicitly placed in scancode set 2 with translation to
   set 1; polling stops once IRQ1 is seen.
@@ -22,6 +21,12 @@
 - Q4_K/Q5_K/Q6_K dequantization/matvec, F16/F32 fallbacks, tensor
   shape/type checks, and K-quant fixtures validated against independent
   references.
+
+## v0.2.2 — 2026-10-21
+
+- PS/2 keyboard controller initialization and polling fallback for the S9.
+- ACPI poweroff now reads `_S5` from the DSDT and uses the FADT SMI/PM1
+  fields instead of treating PM1 lengths as sleep types.
 
 ## v0.2.1 — 2026-10-21
 

@@ -1811,7 +1811,8 @@ fn main() {
             let ch = ev as u8;
             if (ch == 8 as u8 || ch == 127 as u8) {
                 if (cursor == line_len && line_len > 0) {
-                    print("\b \b");
+                    let bs = 8 as char;
+                    print("{bs} {bs}");
                     line_len = line_len - 1;
                     cursor = cursor - 1;
                     history_pos = history_n;
