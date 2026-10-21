@@ -56,17 +56,18 @@ Still required on the Lenovo IdeaPad S9:
 1. Build the tagged ISO with `make iso MODEL=models/tinystories.gguf`.
 2. Boot it and confirm the prompt accepts typing. Then run `config`,
    `fwdpos 0 1`, `bench 8`, and `genprompt "Once upon a time" 0 1 20`.
-3. Record the S9 `bench` result and whether `poweroff` completes.
+3. Record the S9 `bench` result and whether `poweroff` completes after the
+   ACPI `_S5` fix.
 
 The host currently has no physical S9 access, so this remains a release
 checklist item rather than a completed validation.
 
 ## Known limitations
 
-- S9 keyboard input is being hardened with controller initialization and a
-  polling fallback; a field retest is required.
-- `poweroff` prints `powering off...` on the S9 but does not switch it off;
-  reboot and Ctrl+Alt+Del work.
+- S9 keyboard input uses controller initialization plus a polling fallback;
+  field testing passed after the v0.2.1 keyboard fix.
+- `poweroff` now uses the DSDT `_S5` sleep types and the FADT SMI/PM1 fields;
+  S9 retest is required.
 - Heap cap is 64 MB and the inference workspace budget is 60 MB; models above
   the TinyStories class do not fit.
 - Context is capped at 256 positions.

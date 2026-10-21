@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — v0.2.2
+
+- PS/2 keyboard controller initialization and polling fallback for the S9.
+- ACPI poweroff now reads `_S5` from the DSDT and uses the FADT SMI/PM1
+  fields instead of treating PM1 lengths as sleep types.
+
 ## v0.2.1 — 2026-10-21
 
 Tooling and validation release.

@@ -189,6 +189,94 @@ static unsigned char *acpi_find_fadt(void) {
     return (unsigned char *)0;
 }
 
+/* The SLP_TYP values live in the DSDT _S5 package, not in the FADT.
+   This is a deliberately small AML scan for:
+       Name (_S5, Package (N) { <a>, <b>, ... })
+   It accepts the common integer encodings and ignores anything else. */
+static int acpi_aml_int(const unsigned char *p, unsigned int len,
+                        unsigned int *at, unsigned int *out) {
+    if (*at >= len) return 0;
+    unsigned char op = p[(*at)++];
+    unsigned int v = 0;
+    if (op == 0x00) {
+        v = 0;
+    } else if (op == 0x01) {
+        v = 1;
+    } else if (op == 0x0A) {
+        if (*at + 1 > len) return 0;
+        v = p[(*at)++];
+    } else if (op == 0x0B) {
+        if (*at + 2 > len) return 0;
+        v = (unsigned int)p[*at] | ((unsigned int)p[*at + 1] << 8);
+        *at += 2;
+    } else if (op == 0x0C) {
+        if (*at + 4 > len) return 0;
+        v = (unsigned int)p[*at] | ((unsigned int)p[*at + 1] << 8)
+          | ((unsigned int)p[*at + 2] << 16)
+          | ((unsigned int)p[*at + 3] << 24);
+        *at += 4;
+    } else {
+        return 0;
+    }
+    *out = v;
+    return 1;
+}
+
+static int acpi_s5_types(unsigned char *dsdt, unsigned char *a,
+                         unsigned char *b) {
+    if (!dsdt || !acpi_sig(dsdt, "DSDT")) return 0;
+    unsigned int len = *(unsigned int *)(dsdt + 4);
+    if (len < 40) return 0;
+
+    for (unsigned int p = 36; p + 6 < len; p++) {
+        if (dsdt[p] != 0x08) continue;
+        if (dsdt[p + 1] != '_' || dsdt[p + 2] != 'S'
+                || dsdt[p + 3] != '5' || dsdt[p + 4] != '_') continue;
+        unsigned int at = p + 5;
+        if (at >= len || dsdt[at] != 0x12) continue;
+        at++;
+        if (at >= len) continue;
+        unsigned char lead = dsdt[at++];
+        unsigned int plen = 0;
+        if ((lead & 0xC0) == 0) {
+            plen = lead & 0x3F;
+        } else {
+            int n = lead >> 6;
+            plen = lead & 0x0F;
+            for (int i = 0; i < n; i++) {
+                if (at >= len) return 0;
+                plen |= (unsigned int)dsdt[at++] << (4 + 8 * i);
+            }
+        }
+        unsigned int end = at + plen;
+        if (end > len || at >= end) continue;
+        unsigned int count = dsdt[at++];
+        if (count == 0) continue;
+        unsigned int va = 0, vb = 0;
+        if (!acpi_aml_int(dsdt, end, &at, &va)) continue;
+        if (count >= 2) {
+            if (!acpi_aml_int(dsdt, end, &at, &vb)) continue;
+        } else {
+            vb = va;
+        }
+        if (va <= 7 && vb <= 7) {
+            *a = (unsigned char)va;
+            *b = (unsigned char)vb;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static unsigned int acpi_dsdt_addr(unsigned char *fadt, unsigned int len) {
+    unsigned int dsdt = *(unsigned int *)(fadt + 40);
+    if (dsdt == 0 && len >= 152) {
+        unsigned long long x = *(unsigned long long *)(fadt + 144);
+        if (x <= 0xFFFFFFFFULL) dsdt = (unsigned int)x;
+    }
+    return dsdt;
+}
+
 __attribute__((noreturn)) void lp_poweroff(void) {
     lp_println("powering off...");
     unsigned char *fadt = acpi_find_fadt();
@@ -197,25 +285,44 @@ __attribute__((noreturn)) void lp_poweroff(void) {
         if (len >= 90) {
             unsigned int pm1a = *(unsigned int *)(fadt + 64);
             unsigned int pm1b = *(unsigned int *)(fadt + 68);
-            unsigned char slp_typa = fadt[88];
-            unsigned char slp_typb = fadt[89];
+            unsigned int smi = *(unsigned int *)(fadt + 48);
+            unsigned char acpi_enable = fadt[52];
+            unsigned char slp_a = 5, slp_b = 5;
+            int have_s5 = 0;
+
+            if (len >= 148) {
+                unsigned int dsdt = acpi_dsdt_addr(fadt, len);
+                have_s5 = acpi_s5_types((unsigned char *)dsdt, &slp_a, &slp_b);
+            }
+            if (!have_s5) {
+                lp_println("ACPI: _S5 not found; assuming SLP_TYP 5");
+            }
+
             if (pm1a != 0) {
                 unsigned int val = inw((uint16_t)pm1a);
-                if ((val & 1U) == 0) outw((uint16_t)pm1a, (uint16_t)(val | 1U));
+                if ((val & 1U) == 0 && smi != 0 && acpi_enable != 0) {
+                    outb((uint16_t)smi, acpi_enable);
+                    for (int i = 0; i < 100000; i++) {
+                        if ((inw((uint16_t)pm1a) & 1U) != 0) break;
+                    }
+                    val = inw((uint16_t)pm1a);
+                }
                 outw((uint16_t)pm1a,
-                     (uint16_t)(((unsigned int)slp_typa << 10) | (1U << 13)));
+                     (uint16_t)((val & ~(7U << 10))
+                                | ((unsigned int)slp_a << 10) | (1U << 13)));
             }
             if (pm1b != 0) {
                 unsigned int val = inw((uint16_t)pm1b);
-                if ((val & 1U) == 0) outw((uint16_t)pm1b, (uint16_t)(val | 1U));
                 outw((uint16_t)pm1b,
-                     (uint16_t)(((unsigned int)slp_typb << 10) | (1U << 13)));
+                     (uint16_t)((val & ~(7U << 10))
+                                | ((unsigned int)slp_b << 10) | (1U << 13)));
             }
-            /* Try emulator shutdown ports before halting if the firmware
-               did not act on the PM1 write. */
+
+            /* Emulator fallback if the PM1 write did not take effect. */
             outw(0x604, 0x2000);
             outw(0xB004, 0x2000);
             outw(0x4004, 0x2000);
+            lp_println("ACPI shutdown did not complete; halted");
             for (;;) __asm__ volatile("cli; hlt");
         }
     }

@@ -91,7 +91,8 @@ line editing.
 - `matvec` — diagnostic matrix-vector multiplication on the first tensor.
 - `filetest` — exercise the freestanding file I/O failure contract.
 - `reboot` — reboot the machine; Ctrl+Alt+Del does the same from the keyboard.
-- `poweroff` — shut down via ACPI PM1, with QEMU/emulator port fallbacks.
+- `poweroff` — shut down via ACPI S5 (`_S5` sleep types and PM1 control),
+  with QEMU/emulator port fallbacks.
 
 ### Tokenizer
 
@@ -107,7 +108,7 @@ line editing.
   generate `n` continuation tokens. Temperature `0` is greedy.
 - `reset` — clear the KV cache without rebooting.
 - `reboot` — reset the machine; Ctrl+Alt+Del also works.
-- `poweroff` — power down through ACPI when the firmware exposes it.
+- `poweroff` — power down through ACPI S5 when the firmware exposes it.
 
 Generation stops at EOS or when the configured context is full. `generate`,
 `genprompt`, and `fwdpos` clear the KV cache before they run, and `reset`
