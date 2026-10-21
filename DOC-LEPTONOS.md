@@ -23,7 +23,9 @@ see [ROADMAP.md](ROADMAP.md).
   predicts token **9038** (`Once`), matching the Python reference.
 - Tokenizer: `encode Once upon a time` returns `[9038, 2501, 263, 931]`.
 - Scope: inference workspaces are sized from GGUF metadata, within a 60 MB
-  budget and 256-position context cap. Q4_0/Q8_0, F32 norms, and GQA are
+  budget and 256-position context cap. TinyStories is the fast regression
+  model; SmolLM2-135M (30 layers, GQA 9/3, GPT-2 tokenizer, tied output) is
+  the realistic test profile. Q4_0/Q8_0, F32 norms, and GQA are
   supported; modern K-quants are not.
 
 ## 1. Architecture

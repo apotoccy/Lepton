@@ -383,6 +383,20 @@ token **29892** (`,`), matching the first greedy token from:
 genprompt "Once upon a time" 0 1 1
 ```
 
+## Model profiles
+
+TinyStories remains the fast deterministic regression model. SmolLM2-135M is
+the realistic model profile: 30 layers, 576 hidden, GQA 9/3, GPT-2 tokenizer,
+49k vocabulary, tied output. See [MODELS.md](MODELS.md) for dimensions,
+checksums, expected outputs, and test recipes.
+
+```bash
+make iso MODEL=models/smallm.gguf
+```
+
+The kernel caps SmolLM2's 8192-position metadata context to 256 positions for
+the current 60 MB workspace budget.
+
 ## Model naming note
 
 The reference model is called TinyStories-15M, but the GGUF stores about 24.4M

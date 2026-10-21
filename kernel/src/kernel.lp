@@ -105,18 +105,22 @@ fn print_token(s: str) -> void {
     while (s[len] != '\0') { len = len + 1; }
     var i: i64 = 0;
     while (i < len) {
-        if (i + 2 < len) {
-            let b0 = (s[i] as u8) as i64;
-            let b1 = (s[i+1] as u8) as i64;
-            let b2 = (s[i+2] as u8) as i64;
-            if (b0 == 0xE2 && b1 == 0x96 && b2 == 0x81) {
-                print(" ");
-                i = i + 3;
-            } else {
-                let c = s[i];
-                print("{c}");
-                i = i + 1;
-            }
+        if (i + 2 < len
+                && (s[i] as u8) == 0xE2 as u8
+                && (s[i+1] as u8) == 0x96 as u8
+                && (s[i+2] as u8) == 0x81 as u8) {
+            print(" ");
+            i = i + 3;
+        } else if (i + 1 < len
+                && (s[i] as u8) == 0xC4 as u8
+                && (s[i+1] as u8) == 0xA0 as u8) {
+            print(" ");
+            i = i + 2;
+        } else if (i + 1 < len
+                && (s[i] as u8) == 0xC4 as u8
+                && (s[i+1] as u8) == 0x8A as u8) {
+            print("\n");
+            i = i + 2;
         } else {
             let c = s[i];
             print("{c}");
@@ -153,6 +157,13 @@ fn default_model_config() -> ModelConfig {
         n_head_kv: 6, head_dim: 48, max_seq: 128,
         vocab_size: 32000, rms_eps: 1e-5f,
     );
+}
+
+fn model_bos(model: ptr[u8]) -> i64 {
+    let kv_count = read_u64(model, 16);
+    let off = find_kv(model, 24, kv_count, "tokenizer.ggml.bos_token_id");
+    if (off < 0) { return 1; }
+    return read_u32(model, off) as i64;
 }
 
 fn model_eos(model: ptr[u8]) -> i64 {
@@ -898,7 +909,10 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
     rmsnorm_n(hidden, wbuf, final_n, n_embd, cfg.rms_eps);
 
     /* Output projection: fill logits[vocab] with raw scores */
-    let ow_t = tensor_by_name(model, tstart, tc, "output.weight");
+    var ow_t = tensor_by_name(model, tstart, tc, "output.weight");
+    if (ow_t.name_len == 0 as u64) {
+        ow_t = emb_t;   /* tied token embedding/output */
+    }
     let v_size = ow_t.dim1 as i64;
     if (ow_t.dim0 as i64 != n_embd) {
         println("  inference error: output projection width mismatch");
@@ -1220,6 +1234,92 @@ fn bpe_encode_word(model: ptr[u8],
     return m_n;
 }
 
+fn model_is_gpt2(model: ptr[u8]) -> bool {
+    let kc = read_u64(model, 16);
+    let off = find_kv(model, 24, kc, "tokenizer.ggml.model");
+    if (off < 0) { return false; }
+    let len = read_u64(model, off) as i64;
+    if (len != 4) { return false; }
+    return read_u8(model, off + 8) == 103 as u8
+        && read_u8(model, off + 9) == 112 as u8
+        && read_u8(model, off + 10) == 116 as u8
+        && read_u8(model, off + 11) == 50 as u8;
+}
+
+fn gpt2_printable(b: i64) -> bool {
+    return (b >= 33 && b <= 126) || (b >= 161 && b <= 172)
+        || (b >= 174 && b <= 255);
+}
+
+fn gpt2_codepoint(b: i64) -> i64 {
+    if (gpt2_printable(b)) { return b; }
+    var n: i64 = 0;
+    var x: i64 = 0;
+    while (x < b) {
+        if (!gpt2_printable(x)) { n = n + 1; }
+        x = x + 1;
+    }
+    return 256 + n;
+}
+
+fn append_utf8(cp: i64, buf: ptr[u8], pos: i64) -> i64 {
+    if (cp < 0x80) {
+        buf[pos] = cp as u8;
+        return pos + 1;
+    }
+    if (cp < 0x800) {
+        buf[pos] = (0xC0 | (cp >> 6)) as u8;
+        buf[pos + 1] = (0x80 | (cp & 0x3F)) as u8;
+        return pos + 2;
+    }
+    buf[pos] = (0xE0 | (cp >> 12)) as u8;
+    buf[pos + 1] = (0x80 | ((cp >> 6) & 0x3F)) as u8;
+    buf[pos + 2] = (0x80 | (cp & 0x3F)) as u8;
+    return pos + 3;
+}
+
+fn encode_prompt_gpt2(model: ptr[u8],
+                      tok_table: ptr[u32], tok_count: i64,
+                      merge_table: ptr[u32], merge_count: i64,
+                      text_buf: ptr[u8], text_start: i64, text_end: i64,
+                      out_ids: ptr[u32]) -> i64 {
+    let mapped = alloc([u8; 512]) as ptr[u8];
+    let pieces_buf = alloc([u8; 65536]) as ptr[u8];
+    let pieces_len = alloc([u32; 256]) as ptr[u32];
+    let temp_ids = alloc([u32; 256]) as ptr[u32];
+    var n: i64 = 0;
+    var i: i64 = text_start;
+    while (i < text_end) {
+        let b = read_u8(text_buf, i) as i64;
+        n = append_utf8(gpt2_codepoint(b), mapped, n);
+        i = i + 1;
+    }
+    let np = bpe_encode_word(model, tok_table, tok_count,
+                             merge_table, merge_count,
+                             mapped, n, pieces_buf, pieces_len, temp_ids);
+    var j: i64 = 0;
+    while (j < np) {
+        out_ids[j] = temp_ids[j];
+        j = j + 1;
+    }
+    return np;
+}
+
+fn encode_prompt_dispatch(model: ptr[u8],
+                          tok_table: ptr[u32], tok_count: i64,
+                          merge_table: ptr[u32], merge_count: i64,
+                          text_buf: ptr[u8], text_start: i64, text_end: i64,
+                          out_ids: ptr[u32]) -> i64 {
+    if (model_is_gpt2(model)) {
+        return encode_prompt_gpt2(model, tok_table, tok_count,
+                                  merge_table, merge_count,
+                                  text_buf, text_start, text_end, out_ids);
+    }
+    return encode_prompt(model, tok_table, tok_count,
+                         merge_table, merge_count,
+                         text_buf, text_start, text_end, out_ids);
+}
+
 fn encode_prompt(model: ptr[u8],
                  tok_table: ptr[u32], tok_count: i64,
                  merge_table: ptr[u32], merge_count: i64,
@@ -1435,6 +1535,9 @@ fn tail_append(tail: ptr[u8], tail_len: i64, text: str,
                 && text[i + 1] as u8 == 0x96 as u8
                 && text[i + 2] as u8 == 0x81 as u8) {
             i = i + 3;
+        } else if (text[i] as u8 == 0xC4 as u8
+                && text[i + 1] as u8 == 0xA0 as u8) {
+            i = i + 2;
         } else {
             i = i + 1;
         }
@@ -1459,6 +1562,10 @@ fn tail_append(tail: ptr[u8], tail_len: i64, text: str,
                 && text[j + 2] as u8 == 0x81 as u8) {
             tail[len + outn] = 32 as u8;
             j = j + 3;
+        } else if (text[j] as u8 == 0xC4 as u8
+                && text[j + 1] as u8 == 0xA0 as u8) {
+            tail[len + outn] = 32 as u8;
+            j = j + 2;
         } else {
             tail[len + outn] = text[j] as u8;
             j = j + 1;
@@ -2293,7 +2400,7 @@ fn main() {
                         println("  generating {gen_n} tokens (temp={gen_temp}, top_k={gen_k})...");
                         print("  ");
 
-                        var cur: u32 = 1 as u32;
+                        var cur: u32 = model_bos(gen_m) as u32;
                         var gen_step: i64 = 0;
                         while (gen_step < gen_n && gen_step < gen_cfg.max_seq) {
                             if (generation_cancelled()) { break; }
@@ -2338,11 +2445,11 @@ fn main() {
                             let em = mb_module_start(0 as u32) as ptr[u8];
                             /* Line is at line_buf[0..line_len]. Text starts at 7. */
                             let enc_ids = alloc([u32; 256]) as ptr[u32];
-                            let n_enc = encode_prompt(em, tok_table, tok_count,
-                                                       merge_table, merge_count,
-                                                       line_buf, 7 as i64,
-                                                       line_len,
-                                                       enc_ids);
+                            let n_enc = encode_prompt_dispatch(em, tok_table, tok_count,
+                                                              merge_table, merge_count,
+                                                              line_buf, 7 as i64,
+                                                              line_len,
+                                                              enc_ids);
                             println("  {n_enc} tokens:");
                             var ti: i64 = 0;
                             while (ti < n_enc) {
@@ -2398,10 +2505,19 @@ fn main() {
                                 var gp_len: i64 = 0;
                                 var gp_i: i64 = 0;
                                 while (gp_buf[gp_i] != 0 as u8) { gp_i = gp_i + 1; }
-                                gp_len = encode_prompt(gp_m, tok_table, tok_count,
-                                                       merge_table, merge_count,
-                                                       gp_buf, 0 as i64, gp_i,
-                                                       gp_ids);
+                                gp_len = encode_prompt_dispatch(gp_m, tok_table, tok_count,
+                                                               merge_table, merge_count,
+                                                               gp_buf, 0 as i64, gp_i,
+                                                               gp_ids);
+                                if (model_is_gpt2(gp_m)) {
+                                    var bs_i = gp_len;
+                                    while (bs_i > 0) {
+                                        gp_ids[bs_i] = gp_ids[bs_i - 1];
+                                        bs_i = bs_i - 1;
+                                    }
+                                    gp_ids[0] = model_bos(gp_m) as u32;
+                                    gp_len = gp_len + 1;
+                                }
                                 if (gp_len > gp_cfg.max_seq) {
                                     println("  inference error: prompt has {gp_len} tokens; context is {gp_cfg.max_seq}");
                                 } else {
@@ -2508,6 +2624,9 @@ fn main() {
                     } else {
                         let tm = mb_module_start(0 as u32) as ptr[u8];
                         let tc2 = model_config(tm);
+                        if (tc2.n_embd != 288 as i64) {
+                            println("  selftest skipped (TinyStories reference only)");
+                        } else {
                         let tw = scratch_bytes as ptr[f32];
                         let ta = activation_buf as ptr[f32];
                         clear_kv_cache(kv_k_buf, kv_v_buf,
@@ -2544,6 +2663,7 @@ fn main() {
                             println("  selftest PASS (BOS 9038, prompt 29892)");
                         } else {
                             println("  selftest FAIL (BOS {tok_ok}, prompt {prompt_best})");
+                        }
                         }
                     }
                 } else if (starts_with(text, "reset") && (text[5] == '\0' || text[5] == ' ')) {

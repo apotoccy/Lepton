@@ -175,6 +175,10 @@ fn load_model_config(model: ptr[u8], tstart: i64) -> ModelConfig {
     if (max_seq <= 0) {
         max_seq = 128;
     }
+    /* The kernel KV/workspace budget is capped at 256 positions. */
+    if (max_seq > 256) {
+        max_seq = 256;
+    }
 
     var rms_eps = config_f32_arch(
         model, kv_count, arch,

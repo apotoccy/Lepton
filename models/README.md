@@ -1,7 +1,8 @@
 # Models
 
-`tinystories.gguf` is the reference model used by the QEMU/ISO demos and the
-verification tools. It is **not tracked in Git** by default because it is a
+`tinystories.gguf` is the fast reference model used by QEMU/ISO regression and
+the verification tools. `smallm.gguf` is the realistic SmolLM2-135M profile;
+see [../MODELS.md](../MODELS.md). It is **not tracked in Git** by default because it is a
 large binary with its own distribution terms.
 
 ## Expected file
@@ -61,3 +62,35 @@ git commit -m "Add TinyStories model via Git LFS"
 ```
 
 Check GitHub's Git LFS storage and bandwidth quotas before doing this.
+
+
+## SmolLM2-135M profile
+
+- Path: `models/smallm.gguf`
+- Size: 91,726,304 bytes
+- SHA-256:
+
+  ```text
+  6f96e054a48f8fcdb5814abc1203ca12c0f9cce2791ca9a5153caad8c3b5479b
+  ```
+
+- Format: GGUF v3, Llama architecture
+- Tensors: 272
+- Layers: 30
+- Embedding width: 576
+- Heads: 9 / 3 KV (GQA)
+- Head dimension: 64
+- FFN width: 1536
+- Vocabulary: 49,152
+- Context metadata: 8192 (Lepton caps at 256)
+- Quantization: Q4_0 linear layers, Q8_0 token embedding, F32 norms
+- Tokenizer: GPT-2 byte-level BPE
+- Tied output embedding
+- BOS = EOS = 0
+
+## Use the realistic profile
+
+```bash
+make run-kernel MODEL=models/smallm.gguf
+make iso MODEL=models/smallm.gguf
+```

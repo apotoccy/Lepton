@@ -259,18 +259,21 @@ tensors, not the 15M model label.
       `rope.dimension_count`, `context_length`, `layer_norm_rms_epsilon`
 - [x] Derive `head_dim`/vocabulary and validate the supported shape; reject
       unsupported shapes instead of running with wrong dimensions
-- [ ] Validate tensor dimensions and types at load
-- [ ] Tokenizer buffers remain fixed-size but are capacity-checked for the
-      current line/prompt limits
+- [x] Validate matvec tensor dimensions/types at inference; unsupported types
+      fail softly
+- [x] Tokenizer buffers are fixed-size but capacity-checked for the current
+      line/prompt limits
 - [x] Add grouped-query attention (`n_head_kv`) and validate it against a
       two-position synthetic GQA reference
+- [x] Validate real GQA with SmolLM2-135M (9/3 heads)
+- [x] Add GPT-2 byte-level tokenizer support and tied output embeddings
 - [x] Add Q4_K dequantization and direct matvec, plus F16/F32 fallbacks
 - [x] Add Q5_K/Q6_K dequantization and direct matvecs
 - [ ] Plan memory for 1B+ models. They do not fit the current 64 MB heap;
       this likely needs ATA/SD streaming or a larger-RAM target, and should be
       designed before adding the formats
-- [ ] Add the reference forward test (including Q/K/RoPE/attention) to the test
-      suite and compare the first N greedy tokens
+- [x] Add a full forward reference (Q/K/RoPE/attention) and a deterministic
+      `selftest`
 
 ### 3. Compiler: verify the IR and finish the remaining type gaps
 
