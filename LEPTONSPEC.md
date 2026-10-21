@@ -165,7 +165,7 @@ The standard library parses GGUF directly from memory:
 - **Q8_0:** 34-byte blocks, 32 elements, f16 scale plus 32 int8 values.
 - F32 norm tensors are handled directly.
 
-Q4_0/Q8_0/Q4_K are supported with F16/F32 fallbacks; Q5_K/Q6_K are not.
+Q4_0/Q8_0/Q4_K/Q5_K/Q6_K are supported with F16/F32 fallbacks.
 Grouped-query attention is supported.
 
 ### 4.3 Transformer

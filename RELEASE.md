@@ -23,6 +23,7 @@ Date: 2026-10-21
 | `make -B kernel` | Builds `build/kernel/kernel.elf` |
 | GQA fixture | Reference and kernel both predict token 3 at position 1 |
 | Q4_K fixture | Reference and kernel both report sum 928, dot -20.5 |
+| Q5_K/Q6_K fixtures | Reference and kernel agree on sums and dots |
 | Merge fixture | Reference and kernel both resolve `ab` to token 5 (`▁ab`) |
 | Full forward reference | Predicts token 29892 (`,`) for `Once upon a time` |
 | QEMU 128 MB | Boots; `fwdpos 0 1` returns 9038 (`Once`) |
@@ -78,7 +79,7 @@ checklist item rather than a completed validation.
 - Heap cap is 64 MB and the inference workspace budget is 60 MB; models above
   the TinyStories class do not fit.
 - Context is capped at 256 positions.
-- Q4_0, Q8_0, Q4_K, F16, and F32 weights are supported; Q5_K/Q6_K are not.
+- Q4_0, Q8_0, Q4_K, Q5_K, Q6_K, F16, and F32 weights are supported.
 - Tensor shape/type checks now fail softly for incompatible matvecs.
 - GQA is implemented and synthetic-tested; no real GQA model has been run.
 - The tokenizer merge path is synthetic-tested; TinyStories has no merges.

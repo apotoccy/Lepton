@@ -192,12 +192,14 @@ Lepton/
 │   ├── gen_gqa_gguf.py     # Tiny synthetic GQA model fixture
 │   ├── gen_merge_gguf.py   # Tiny tokenizer fixture with BPE merges
 │   ├── gen_q4k_gguf.py     # Tiny Q4_K dequantization fixture
+│   ├── gen_q56_gguf.py     # Tiny Q5_K/Q6_K dequantization fixture
 │   ├── dump_dims.py        # Dump GGUF tensor dimensions
 │   ├── verify_embed.py     # Embedding reference check
 │   ├── verify_forward.py   # Full Q/K/attention reference for TinyStories
 │   ├── verify_gqa.py       # Two-position GQA reference check
 │   ├── verify_merge.py     # Merge-tokenizer reference check
 │   ├── verify_q4k.py       # Q4_K dequantization reference check
+│   ├── verify_q56.py       # Q5_K/Q6_K reference check
 │   └── verify_tokenize.py  # Tokenizer reference (requires merges)
 │
 ├── models/                 # Place downloaded .gguf models here
@@ -342,6 +344,17 @@ make run-kernel MODEL=build/q4k.gguf
 
 At the prompt, `q4ktest` should print `sum=928 dot=-20.5`.
 
+Q5_K/Q6_K fixtures use the same `qktest` command:
+
+```bash
+python3 tools/gen_q56_gguf.py 13 build/q5k.gguf
+python3 tools/verify_q56.py build/q5k.gguf
+python3 tools/gen_q56_gguf.py 14 build/q6k.gguf
+python3 tools/verify_q56.py build/q6k.gguf
+```
+
+Expected: Q5_K `sum=128 dot=-3`; Q6_K `sum=-3968 dot=93`.
+
 ### 8. Measure forward latency
 
 ```text
@@ -381,9 +394,9 @@ These are the boundaries of the current implementation, not a wish list; see
 
 - **Model dimensions.** Activation, KV, logits, and token-table workspaces are
   sized from GGUF metadata, subject to a 60 MB budget and a 256-position
-  context cap. Q4_0/Q8_0/Q4_K weights and F16/F32 fallbacks are supported;
-  Q5_K/Q6_K are not. Tokenizer buffers are capacity-checked for the line and
-  prompt limits.
+  context cap. Q4_0/Q8_0/Q4_K/Q5_K/Q6_K weights and F16/F32 fallbacks are
+  supported. Tokenizer buffers are capacity-checked for the line and prompt
+  limits.
 - **Context safety.** The configured `max_seq` is enforced by the forward guard
   and generation loops, with a hard cap of 256 KV positions. The KV cache is
   allocated for exactly `max_seq` positions.
@@ -401,8 +414,8 @@ These are the boundaries of the current implementation, not a wish list; see
   before the mark. Heap allocation failures are checked, and the heap is
   bounded by the Multiboot memory map (capped at 64 MB, minimum 8 MB after the
   loaded module).
-- **Quantization coverage.** Q4_0, Q8_0, and Q4_K are implemented, plus F16
-  and F32 fallbacks. Q5_K/Q6_K are not implemented.
+- **Quantization coverage.** Q4_0, Q8_0, Q4_K, Q5_K, and Q6_K are implemented,
+  plus F16 and F32 fallbacks.
 - **Freestanding file I/O.** `lp_file_size`, `lp_read_file_at`, and
   `lp_write_file` are defined in the kernel and return `-1`; there is no
   filesystem driver. Hosted builds use real file I/O.

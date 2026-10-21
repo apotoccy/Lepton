@@ -370,15 +370,24 @@ fn dequant_row_tensor(model: ptr[u8], data_start: i64,
         dequant_q8_0_tensor(base + row * blocks * 34, out, blocks);
         return true;
     }
-    if (t.ggml_type == 12 as u32) {
+    if (t.ggml_type == 12 as u32 || t.ggml_type == 13 as u32
+            || t.ggml_type == 14 as u32) {
         if (dim % 256 != 0) {
-            println("  inference error: Q4_K row width is not a multiple of 256");
+            println("  inference error: K-quant row width is not a multiple of 256");
             return false;
         }
         let blocks = dim / 256;
         for b in 0..blocks {
-            dequant_q4_k_block(base + row * blocks * 144 + b * 144,
-                               out + b * 256);
+            if (t.ggml_type == 12 as u32) {
+                dequant_q4_k_block(base + row * blocks * 144 + b * 144,
+                                   out + b * 256);
+            } else if (t.ggml_type == 13 as u32) {
+                dequant_q5_k_block(base + row * blocks * 176 + b * 176,
+                                   out + b * 256);
+            } else {
+                dequant_q6_k_block(base + row * blocks * 210 + b * 210,
+                                   out + b * 256);
+            }
         }
         return true;
     }
@@ -463,6 +472,159 @@ fn matvec_f16(model: ptr[u8], data_start: i64,
     }
 }
 
+
+fn dequant_q5_k_block(src: ptr[u8], dst: ptr[f32]) -> void {
+    let d = read_f16(src, 0);
+    let dmin = read_f16(src, 2);
+    let scales = src + 4;
+    let qh = src + 16;
+    let ql = src + 48;
+    var u1: u8 = 1;
+    var u2: u8 = 2;
+    for j4 in 0..4 {
+        let is = j4 * 2;
+        let sc0 = q4k_scale(scales, is);
+        let m0 = q4k_min(scales, is);
+        let sc1 = q4k_scale(scales, is + 1);
+        let m1 = q4k_min(scales, is + 1);
+        let d0 = d * (sc0 as f32);
+        let mn0 = dmin * (m0 as f32);
+        let d1 = d * (sc1 as f32);
+        let mn1 = dmin * (m1 as f32);
+        let qbase = ql + j4 * 32;
+        let obase = j4 * 64;
+        for l in 0..32 {
+            let byte = qbase[l];
+            var lo = ((byte & 0x0F as u8) as i32);
+            var hi = (((byte >> 4 as u8) & 0x0F as u8) as i32);
+            if ((qh[l] & u1) != 0) { lo = lo + 16; }
+            if ((qh[l] & u2) != 0) { hi = hi + 16; }
+            dst[obase + l] = d0 * (lo as f32) - mn0;
+            dst[obase + l + 32] = d1 * (hi as f32) - mn1;
+        }
+        u1 = u1 << 2 as u8;
+        u2 = u2 << 2 as u8;
+    }
+}
+
+fn dequant_q6_k_block(src: ptr[u8], dst: ptr[f32]) -> void {
+    let d = read_f16(src, 208);
+    for chunk in 0..2 {
+        let ql = src + chunk * 64;
+        let qh = src + 128 + chunk * 32;
+        let sc = src + 192 + chunk * 8;
+        let obase = chunk * 128;
+        for l in 0..32 {
+            let is = l / 16;
+            let q1 = (ql[l] & 0x0F as u8) as i32
+                   | ((((qh[l] >> 0 as u8) & 3 as u8) as i32) << 4);
+            let q2 = (ql[l + 32] & 0x0F as u8) as i32
+                   | ((((qh[l] >> 2 as u8) & 3 as u8) as i32) << 4);
+            let q3 = ((ql[l] >> 4 as u8) & 0x0F as u8) as i32
+                   | ((((qh[l] >> 4 as u8) & 3 as u8) as i32) << 4);
+            let q4 = ((ql[l + 32] >> 4 as u8) & 0x0F as u8) as i32
+                   | ((((qh[l] >> 6 as u8) & 3 as u8) as i32) << 4);
+            let s0 = (sc[is] as i8) as i32;
+            let s1 = (sc[is + 2] as i8) as i32;
+            let s2 = (sc[is + 4] as i8) as i32;
+            let s3 = (sc[is + 6] as i8) as i32;
+            dst[obase + l] = d * (s0 as f32) * ((q1 - 32) as f32);
+            dst[obase + l + 32] = d * (s1 as f32) * ((q2 - 32) as f32);
+            dst[obase + l + 64] = d * (s2 as f32) * ((q3 - 32) as f32);
+            dst[obase + l + 96] = d * (s3 as f32) * ((q4 - 32) as f32);
+        }
+    }
+}
+
+fn matvec_q5_k(model: ptr[u8], data_start: i64,
+               t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
+               rows: i64, cols: i64) -> void {
+    let blocks = cols / 256;
+    let row_bytes = blocks * 176;
+    let base = (model + data_start + (t.data_offset as i64)) as ptr[u8];
+    for r in 0..rows {
+        var acc: f32 = 0.0f;
+        let row = base + r * row_bytes;
+        for b in 0..blocks {
+            let block = row + b * 176;
+            let d = read_f16(block, 0);
+            let dmin = read_f16(block, 2);
+            let scales = block + 4;
+            let qh = block + 16;
+            let ql = block + 48;
+            var u1: u8 = 1;
+            var u2: u8 = 2;
+            for j4 in 0..4 {
+                let is = j4 * 2;
+                let sc0 = q4k_scale(scales, is);
+                let m0 = q4k_min(scales, is);
+                let sc1 = q4k_scale(scales, is + 1);
+                let m1 = q4k_min(scales, is + 1);
+                let d0 = d * (sc0 as f32);
+                let mn0 = dmin * (m0 as f32);
+                let d1 = d * (sc1 as f32);
+                let mn1 = dmin * (m1 as f32);
+                let qbase = ql + j4 * 32;
+                let xbase = b * 256 + j4 * 64;
+                for l in 0..32 {
+                    let byte = qbase[l];
+                    var lo = ((byte & 0x0F as u8) as i32);
+                    var hi = (((byte >> 4 as u8) & 0x0F as u8) as i32);
+                    if ((qh[l] & u1) != 0) { lo = lo + 16; }
+                    if ((qh[l] & u2) != 0) { hi = hi + 16; }
+                    acc = acc + x[xbase + l] * (d0 * (lo as f32) - mn0);
+                    acc = acc + x[xbase + l + 32] * (d1 * (hi as f32) - mn1);
+                }
+                u1 = u1 << 2 as u8;
+                u2 = u2 << 2 as u8;
+            }
+        }
+        y[r] = acc;
+    }
+}
+
+fn matvec_q6_k(model: ptr[u8], data_start: i64,
+               t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
+               rows: i64, cols: i64) -> void {
+    let blocks = cols / 256;
+    let row_bytes = blocks * 210;
+    let base = (model + data_start + (t.data_offset as i64)) as ptr[u8];
+    for r in 0..rows {
+        var acc: f32 = 0.0f;
+        let row = base + r * row_bytes;
+        for b in 0..blocks {
+            let block = row + b * 210;
+            let d = read_f16(block, 208);
+            for chunk in 0..2 {
+                let ql = block + chunk * 64;
+                let qh = block + 128 + chunk * 32;
+                let sc = block + 192 + chunk * 8;
+                let xbase = b * 256 + chunk * 128;
+                for l in 0..32 {
+                    let is = l / 16;
+                    let q1 = (ql[l] & 0x0F as u8) as i32
+                           | ((((qh[l] >> 0 as u8) & 3 as u8) as i32) << 4);
+                    let q2 = (ql[l + 32] & 0x0F as u8) as i32
+                           | ((((qh[l] >> 2 as u8) & 3 as u8) as i32) << 4);
+                    let q3 = ((ql[l] >> 4 as u8) & 0x0F as u8) as i32
+                           | ((((qh[l] >> 4 as u8) & 3 as u8) as i32) << 4);
+                    let q4 = ((ql[l + 32] >> 4 as u8) & 0x0F as u8) as i32
+                           | ((((qh[l] >> 6 as u8) & 3 as u8) as i32) << 4);
+                    let s0 = (sc[is] as i8) as i32;
+                    let s1 = (sc[is + 2] as i8) as i32;
+                    let s2 = (sc[is + 4] as i8) as i32;
+                    let s3 = (sc[is + 6] as i8) as i32;
+                    acc = acc + x[xbase + l] * d * (s0 as f32) * ((q1 - 32) as f32);
+                    acc = acc + x[xbase + l + 32] * d * (s1 as f32) * ((q2 - 32) as f32);
+                    acc = acc + x[xbase + l + 64] * d * (s2 as f32) * ((q3 - 32) as f32);
+                    acc = acc + x[xbase + l + 96] * d * (s3 as f32) * ((q4 - 32) as f32);
+                }
+            }
+        }
+        y[r] = acc;
+    }
+}
+
 fn matvec_tensor(model: ptr[u8], data_start: i64,
                  t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
                  rows: i64, cols: i64) -> bool {
@@ -475,8 +637,9 @@ fn matvec_tensor(model: ptr[u8], data_start: i64,
         println("  inference error: quantized row width is not a multiple of 32");
         return false;
     }
-    if (t.ggml_type == 12 as u32 && cols % 256 != 0) {
-        println("  inference error: Q4_K row width is not a multiple of 256");
+    if ((t.ggml_type == 12 as u32 || t.ggml_type == 13 as u32
+         || t.ggml_type == 14 as u32) && cols % 256 != 0) {
+        println("  inference error: K-quant row width is not a multiple of 256");
         return false;
     }
     if (t.ggml_type == 2 as u32) {
@@ -485,6 +648,10 @@ fn matvec_tensor(model: ptr[u8], data_start: i64,
         matvec_q8_0(model, data_start, t, x, y, rows, cols);
     } else if (t.ggml_type == 12 as u32) {
         matvec_q4_k(model, data_start, t, x, y, rows, cols);
+    } else if (t.ggml_type == 13 as u32) {
+        matvec_q5_k(model, data_start, t, x, y, rows, cols);
+    } else if (t.ggml_type == 14 as u32) {
+        matvec_q6_k(model, data_start, t, x, y, rows, cols);
     } else if (t.ggml_type == 0 as u32) {
         matvec_f32(model, data_start, t, x, y, rows, cols);
     } else if (t.ggml_type == 1 as u32) {
@@ -1865,6 +2032,37 @@ fn main() {
                             print("  '");
                             print_token(fwd_str);
                             println("'");
+                        }
+                    }
+                } else if (starts_with(text, "qktest")) {
+                    if (mb_module_count() == 0 as u32) {
+                        println("  no module loaded");
+                    } else {
+                        let km = mb_module_start(0 as u32) as ptr[u8];
+                        let kdata = model_data_start(km);
+                        let ktc = read_u64(km, 8);
+                        let kkc = read_u64(km, 16);
+                        let kts = skip_kv_block(km, 24, kkc);
+                        let kt = tensor_by_name(km, kts, ktc, "test.weight");
+                        let kbuf = scratch_bytes as ptr[f32];
+                        if (kt.ggml_type == 12 as u32) {
+                            dequant_q4_k_block(km + kdata + (kt.data_offset as i64), kbuf);
+                        } else if (kt.ggml_type == 13 as u32) {
+                            dequant_q5_k_block(km + kdata + (kt.data_offset as i64), kbuf);
+                        } else if (kt.ggml_type == 14 as u32) {
+                            dequant_q6_k_block(km + kdata + (kt.data_offset as i64), kbuf);
+                        } else {
+                            println("  qktest: unsupported type {kt.ggml_type}");
+                        }
+                        var ksum: f32 = 0.0f;
+                        for ki in 0..256 { ksum = ksum + kbuf[ki]; }
+                        let kx = (scratch_bytes + 1024) as ptr[f32];
+                        let ky = (scratch_bytes + 2048) as ptr[f32];
+                        for ki in 0..256 { kx[ki] = ((ki % 7) - 3) as f32; }
+                        if (!matvec_tensor(km, kdata, kt, kx, ky, 1, 256)) {
+                            println("  qktest: matvec failed");
+                        } else {
+                            println("  qk type={kt.ggml_type} sum={ksum} dot={ky[0]}");
                         }
                     }
                 } else if (starts_with(text, "q4ktest")) {

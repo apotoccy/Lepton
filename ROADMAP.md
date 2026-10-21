@@ -264,7 +264,7 @@ tensors, not the 15M model label.
 - [x] Add grouped-query attention (`n_head_kv`) and validate it against a
       two-position synthetic GQA reference
 - [x] Add Q4_K dequantization and direct matvec, plus F16/F32 fallbacks
-- [ ] Add Q5_K/Q6_K dequantization or direct dot products
+- [x] Add Q5_K/Q6_K dequantization and direct matvecs
 - [ ] Plan memory for 1B+ models. They do not fit the current 64 MB heap;
       this likely needs ATA/SD streaming or a larger-RAM target, and should be
       designed before adding the formats
@@ -315,15 +315,15 @@ The original goal was 32-bit PCs *and* modern devices.
       very wide integers can still lose precision
 - [ ] Untyped array/vector literals still infer a common element type; array
       conversions are explicit (`a as [f32; N]`)
-- [ ] Kernel linear layers support Q4_0/Q8_0/Q4_K plus F16/F32 fallbacks and
-      F32 norms; Q5_K/Q6_K are still missing
+- [x] Kernel linear layers support Q4_0/Q8_0/Q4_K/Q5_K/Q6_K plus F16/F32
+      fallbacks and F32 norms
 - [ ] `parse_header` leaks a 24-byte buffer (fine for one call, bad in a loop)
 - [x] `lp_panic` is marked `noreturn` in freestanding declarations and the
       kernel definition
 
 **Kernel and OS**
 
-- [ ] Q5_K/Q6_K are not implemented; Q4_K and F16/F32 fallbacks are supported.
+- [x] Q4_K/Q5_K/Q6_K and F16/F32 fallbacks are supported.
       Inference workspaces are config-sized within a 60 MB budget and a
       256-position context cap.
 - [ ] `free` remains a no-op in the bump allocator

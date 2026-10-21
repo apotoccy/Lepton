@@ -17,8 +17,9 @@
 - `bench` progress markers.
 - Direct Q4_0/Q8_0 matvecs; QEMU baseline improved from ~299.4 to
   ~272.5 ms/token.
-- Q4_K dequantization/matvec, F16/F32 fallbacks, tensor shape/type checks,
-  and a Q4_K fixture validated against an independent reference.
+- Q4_K/Q5_K/Q6_K dequantization/matvec, F16/F32 fallbacks, tensor
+  shape/type checks, and K-quant fixtures validated against independent
+  references.
 
 ## v0.2.1 — 2026-10-21
 
