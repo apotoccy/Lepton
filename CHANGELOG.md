@@ -8,6 +8,8 @@
 
 ## Unreleased — v0.3.0
 
+- PS/2 keyboard is explicitly placed in scancode set 2 with translation to
+  set 1; polling stops once IRQ1 is seen.
 - REPL line editing: Left/Right, Home/End, Delete, Ctrl+C, Ctrl+L.
 - Eight-entry command history with Up/Down.
 - Tab completion for command names.

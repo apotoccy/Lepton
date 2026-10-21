@@ -233,6 +233,7 @@ static void kbd_emit(char c) {
 }
 
 static u8 kbd_extended = 0;
+static volatile u8 kbd_irq_seen = 0;
 
 static void kbd_handle(u8 sc) {
     if (sc == 0xE0) { kbd_extended = 1; return; }
@@ -264,6 +265,7 @@ static void kbd_handle(u8 sc) {
 }
 
 void kbd_poll(void) {
+    if (kbd_irq_seen) return;
     u8 status = inb(0x64);
     if ((status & 0x01) != 0 && (status & 0x20) == 0) {
         kbd_handle(inb(0x60));
@@ -306,6 +308,7 @@ void irq_handler(uint32_t *frame) {
     }
     /* IRQ 1 (keyboard) — read and discard until a real driver lands. */
     if (irq == 1) {
+        kbd_irq_seen = 1;
         kbd_handle(inb(0x60));
     }
     if (irq == 4) {
@@ -333,6 +336,12 @@ static int kbd_wait_output(void) {
     return 0;
 }
 
+static void kbd_send(u8 v) {
+    if (!kbd_wait_input()) return;
+    outb(0x60, v);
+    if (kbd_wait_output()) (void)inb(0x60);
+}
+
 static void keyboard_init(void) {
     /* Disable both devices and flush a possibly stale output buffer. */
     if (kbd_wait_input()) outb(0x64, 0xAD);
@@ -353,10 +362,13 @@ static void keyboard_init(void) {
         if (kbd_wait_input()) outb(0x60, cfg);
     }
 
-    /* Enable the keyboard and ask it to start scanning. */
+    /* Enable the keyboard, select scancode set 2, and start scanning.
+       The controller translation bit above turns set 2 into the set-1
+       codes used by the key tables. */
     if (kbd_wait_input()) outb(0x64, 0xAE);
-    if (kbd_wait_input()) outb(0x60, 0xF4);
-    if (kbd_wait_output()) (void)inb(0x60);  /* ACK */
+    kbd_send(0xF0);
+    kbd_send(0x02);
+    kbd_send(0xF4);
 }
 
 /* ---- Public API ---- */
