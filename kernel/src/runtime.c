@@ -92,6 +92,14 @@ void lp_alloc_reset(void) {
     heap_used = 0;
 }
 
+long long lp_heap_used(void) {
+    return (long long)heap_used;
+}
+
+long long lp_heap_max(void) {
+    return (long long)heap_max;
+}
+
 long long lp_alloc_mark(void) {
     return (long long)heap_used;
 }

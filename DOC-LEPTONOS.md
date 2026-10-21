@@ -109,11 +109,15 @@ cursor editing, eight-entry history, tab completion, and Ctrl+C/Ctrl+L.
   `generate 0` selects the greedy path.
 - `genprompt "<text>" [temp] [top_k] [n]` — encode a prompt, prefill, and
   generate `n` continuation tokens. Temperature `0` is greedy.
+- `stop "<text>"` — set a stop sequence for generation; `stop` clears it.
+- `selftest` — deterministic TinyStories forward check.
+- `mem` — bump-heap usage and limit.
 - `reset` — clear the KV cache without rebooting.
 - `reboot` — reset the machine; Ctrl+Alt+Del also works.
 - `poweroff` — power down through ACPI S5 when the firmware exposes it.
 
-Generation stops at EOS or when the configured context is full. `generate`,
+Generation streams tokens as they are produced and stops at EOS, a stop
+sequence, Ctrl+C, or when the configured context is full. `generate`,
 `genprompt`, and `fwdpos` clear the KV cache before they run, and `reset`
 provides an explicit cleanup command. Each REPL command also reclaims its
 transient heap allocations with an allocator mark/release around the command.

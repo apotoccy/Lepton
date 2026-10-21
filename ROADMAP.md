@@ -170,13 +170,14 @@ Generation & Tokenizer:
 
 - [x] Autoregressive generation with configurable length and EOS stopping
       (`generate`/`genprompt` default to 30 tokens)
+- [x] Streamed output, stop sequences, Ctrl+C cancellation, and `selftest`
 - [x] Sampling: temperature, top-k, xorshift32 PRNG
 - [x] Tokenizer decode (BPE vocab offsets, U+2581 substitution)
 - [x] Tokenizer encode (BPE merges path plus greedy fallback) with bounded
       vocab/piece buffers, `<0xNN>` byte fallback, and a synthetic merge-path
       test
 - [x] Prompt-based generation (`genprompt "..." T K N`), with temperature
-      `0` selecting greedy output
+      `0` selecting greedy output and streamed tokens
 - [x] Tokenizer byte fallback to `<0xNN>` vocabulary entries
 - [x] Bounds-safe token table, decode IDs, merge table, and piece buffers
 - [x] Test the BPE merge path with a synthetic merge fixture
@@ -292,10 +293,10 @@ tensors, not the 15M model label.
 - [x] `reset` command to clear the KV cache without rebooting
 - [x] Soft configuration/inference errors return to the prompt
 - [x] Fatal panic screen with Ctrl+Alt+Del reboot path
-- [ ] `mem` command showing heap usage and limits
+- [x] `mem` command showing heap usage and limits
 - [ ] `perf` command showing per-phase timings
-- [ ] Prompt/generation length guard tied to the configured context length
-- [ ] Keyboard Ctrl/Alt handling and caps-lock LED control
+- [x] Prompt/generation length guard tied to the configured context length
+- [x] Keyboard Ctrl/Alt handling; caps-lock LED control remains
 
 ### 5. Phase 4: ARM / smartphones
 
@@ -335,16 +336,15 @@ The original goal was 32-bit PCs *and* modern devices.
 
 **Tooling and testing**
 
-- [ ] `tools/verify_forward.py` skips Q/K and attention; it is a partial
-      reference, not a full forward pass
+- [x] `tools/verify_forward.py` covers Q/K, attention, and all six layers
 - [ ] `tools/verify_tokenize.py` requires `tokenizer.ggml.merges` and crashes on
       models without merges (TinyStories)
 - [ ] `tools/gen_test_gguf.py` produces a single-tensor file, not a runnable
       model; `make run-kernel` without `MODEL=` cannot run AI commands
 - [ ] The tools hardcode `models/tinystories.gguf`; add path arguments
 - [ ] No automated QEMU/kernel smoke test in CI
-- [ ] No deterministic generation regression test (the first greedy token after
-      "Once upon a time" should be 29892)
+- [x] Deterministic generation regression via `selftest` and the full
+      forward reference (first greedy token 29892)
 
 ---
 

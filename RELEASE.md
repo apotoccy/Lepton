@@ -83,8 +83,8 @@ checklist item rather than a completed validation.
 - Tensor shape/type checks now fail softly for incompatible matvecs.
 - GQA is implemented and synthetic-tested; no real GQA model has been run.
 - The tokenizer merge path is synthetic-tested; TinyStories has no merges.
-- Generation defaults to 30 tokens and has no streaming or stop-sequence
-  controls beyond EOS.
+- Generation defaults to 30 tokens and streams output; stop sequences and
+  Ctrl+C cancellation are supported.
 - No scrollback; command history is limited to eight entries.
 - 272.5 ms/token is the current QEMU baseline (about 9% faster than the
   previous 299.4 ms/token); S9 performance is expected to be slower.

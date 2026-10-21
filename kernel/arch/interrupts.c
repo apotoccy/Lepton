@@ -279,6 +279,15 @@ uint32_t kbd_read(void) {
     return ev;
 }
 
+uint32_t kbd_cancel_pending(void) {
+    u16 i = kbd_tail;
+    while (i != kbd_head) {
+        if (kbd_buf[i] == KBD_CTRL_C || kbd_buf[i] == 3u) return 1;
+        i = (i + 1) % KBD_BUF_SIZE;
+    }
+    return 0;
+}
+
 void irq_handler(uint32_t *frame) {
     uint32_t vec = frame[8];            /* [8] is int#, [9] is err */
     (void)frame;

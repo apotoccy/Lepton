@@ -102,8 +102,9 @@ as a GRUB ISO.
 - **Interactive OS:** VGA text console, PS/2 and serial keyboard, 100 Hz PIT,
   interrupts, PS/2 controller initialization (scancode set 1), IRQ1 plus a
   polling fallback, and a line-edited REPL with colored prompts, eight-entry
-  history, cursor editing, tab completion, help topics, `clear`, `reset`,
-  `reboot`, `poweroff`, Ctrl+Alt+Del, and ACPI shutdown. Expected
+  history, cursor editing, tab completion, help topics, `stop` sequences,
+  Ctrl+C cancellation, `selftest`, `mem`, `clear`, `reset`, `reboot`,
+  `poweroff`, Ctrl+Alt+Del, and ACPI shutdown. Expected
   inference/configuration errors return to the prompt; fatal panics print a
   reboot hint.
 - **Verified target:** TinyStories-15M on a 2008 Lenovo IdeaPad S9 (Intel Atom),
@@ -284,7 +285,9 @@ generate 0 1 5
 genprompt "Once upon a time" 0 1 5
 ```
 
-Generation stops at EOS or when the configured context is full.
+Generation streams tokens as they are produced and stops at EOS, a configured
+stop sequence, Ctrl+C, or when the configured context is full. Set a stop
+sequence with `stop "text"`; `stop` with no text clears it.
 
 To quit QEMU: press `Ctrl-A`, release, then `X`.
 
@@ -422,6 +425,9 @@ These are the boundaries of the current implementation, not a wish list; see
 - **Tokenizer edge cases.** The BPE merge path is exercised by a synthetic
   fixture; piece buffers and vocab/count checks are bounded, and unknown bytes
   map to GGUF `<0xNN>` tokens when present.
+- **Generation controls.** Stop sequences match decoded text after
+  normalizing the sentencepiece marker to a space. `selftest` is specific to
+  the TinyStories reference token IDs.
 - **One backend.** Only scalar and x86-64 SSE2 are implemented. There is no
   AVX2, NEON/ARM, LLVM IR, or WASM backend yet.
 

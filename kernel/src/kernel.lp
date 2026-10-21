@@ -11,9 +11,12 @@ extern fn cpu_hlt() -> void;
 extern fn ticks() -> u32;
 extern fn kbd_read() -> u32;
 extern fn kbd_poll() -> void;
+extern fn kbd_cancel_pending() -> u32;
 extern fn lp_cursor_left() -> void;
 extern fn lp_cursor_right() -> void;
 extern fn lp_clear_screen() -> void;
+extern fn lp_heap_used() -> i64;
+extern fn lp_heap_max() -> i64;
 extern fn vga_set_color(c: u8) -> void;
 extern fn mb_module_count() -> u32;
 extern fn mb_module_start(idx: u32) -> u32;
@@ -1421,6 +1424,66 @@ fn complete_line(buf: ptr[u8], len: i64, cursor: i64) -> i64 {
     return len;
 }
 
+fn tail_append(tail: ptr[u8], tail_len: i64, text: str,
+               max_len: i64) -> i64 {
+    /* Normalize the sentencepiece marker U+2581 to a plain space so
+       user-facing stop strings match decoded text. */
+    var n: i64 = 0;
+    var i: i64 = 0;
+    while (text[i] != '\0') {
+        if (text[i] as u8 == 0xE2 as u8
+                && text[i + 1] as u8 == 0x96 as u8
+                && text[i + 2] as u8 == 0x81 as u8) {
+            i = i + 3;
+        } else {
+            i = i + 1;
+        }
+        n = n + 1;
+    }
+    if (n >= max_len) { n = max_len; }
+    var len = tail_len;
+    if (len + n > max_len) {
+        let drop = len + n - max_len;
+        var d: i64 = 0;
+        while (d < len - drop) {
+            tail[d] = tail[d + drop];
+            d = d + 1;
+        }
+        len = len - drop;
+    }
+    var j: i64 = 0;
+    var outn: i64 = 0;
+    while (outn < n && text[j] != '\0') {
+        if (text[j] as u8 == 0xE2 as u8
+                && text[j + 1] as u8 == 0x96 as u8
+                && text[j + 2] as u8 == 0x81 as u8) {
+            tail[len + outn] = 32 as u8;
+            j = j + 3;
+        } else {
+            tail[len + outn] = text[j] as u8;
+            j = j + 1;
+        }
+        outn = outn + 1;
+    }
+    return len + outn;
+}
+
+fn stop_match(tail: ptr[u8], tail_len: i64,
+              stop: ptr[u8], stop_len: i64) -> bool {
+    if (stop_len <= 0 || tail_len < stop_len) { return false; }
+    var i: i64 = 0;
+    while (i < stop_len) {
+        if (tail[tail_len - stop_len + i] != stop[i]) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+fn generation_cancelled() -> bool {
+    kbd_poll();
+    return kbd_cancel_pending() != 0 as u32;
+}
+
 fn main() {
     serial_init();
     vga_init();
@@ -1625,7 +1688,7 @@ fn main() {
     println("[7] Enabling interrupts");
     interrupts_init();
     println("    timer at 100 Hz, keyboard ready");
-    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
+    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, stop, mem, selftest, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
     println("");
 
     var line_buf = alloc([u8; 128]) as ptr[u8];
@@ -1635,6 +1698,8 @@ fn main() {
     let history_len = alloc([u8; 8]) as ptr[u8];
     var history_n: i64 = 0;
     var history_pos: i64 = 0;
+    let stop_buf = alloc([u8; 64]) as ptr[u8];
+    var stop_len: i64 = 0;
 
     vga_set_color(0x0A as u8);
     print("lepton> ");
@@ -2209,9 +2274,12 @@ fn main() {
                         let gen_m = mb_module_start(0 as u32) as ptr[u8];
                         let gen_cfg = model_config(gen_m);
                         if (gen_n > gen_cfg.max_seq) {
+                            println("  note: generation capped to the {gen_cfg.max_seq}-token context");
                             gen_n = gen_cfg.max_seq;
                         }
                         let gen_eos = model_eos(gen_m);
+                        let gen_tail = alloc([u8; 128]) as ptr[u8];
+                        var gen_tail_len: i64 = 0;
 
                         println("  Model starts at RAM address: {mb_module_start(0 as u32)}");
 
@@ -2227,6 +2295,7 @@ fn main() {
                         var cur: u32 = 1 as u32;
                         var gen_step: i64 = 0;
                         while (gen_step < gen_n && gen_step < gen_cfg.max_seq) {
+                            if (generation_cancelled()) { break; }
                             if (!forward_token_at_pos(gen_m, gen_cfg,
                                                       cur as i64, gen_step,
                                                       gen_w, gen_a,
@@ -2238,6 +2307,10 @@ fn main() {
                                             gen_temp, gen_k as i32);
                             if (cur as i64 == gen_eos) { break; }
                             let gs = decode_tok(gen_m, tok_table, tok_count, cur);
+                            gen_tail_len = tail_append(gen_tail, gen_tail_len,
+                                                       gs, 128);
+                            if (stop_match(gen_tail, gen_tail_len,
+                                           stop_buf, stop_len)) { break; }
                             print_token(gs);
                             gen_step = gen_step + 1;
                         }
@@ -2332,7 +2405,10 @@ fn main() {
                                     println("  inference error: prompt has {gp_len} tokens; context is {gp_cfg.max_seq}");
                                 } else {
                                 let gp_remaining = gp_cfg.max_seq - gp_len;
-                                if (gp_n > gp_remaining) { gp_n = gp_remaining; }
+                                if (gp_n > gp_remaining) {
+                                    println("  note: generation capped to the remaining context");
+                                    gp_n = gp_remaining;
+                                }
                                 if (gp_n <= 0) {
                                     println("  inference error: prompt fills the context");
                                 } else {
@@ -2374,8 +2450,11 @@ fn main() {
                                     let gp_eos = model_eos(gp_m);
                                     println("  generating {gp_n} tokens (temp={gp_t}, top_k={gp_k})...");
                                     print("  ");
+                                    let gp_tail = alloc([u8; 128]) as ptr[u8];
+                                    var gp_tail_len: i64 = 0;
                                     var gp_g: i64 = 0;
                                     while (gp_g < gp_n && gp_pos < gp_cfg.max_seq) {
+                                        if (generation_cancelled()) { break; }
                                         let gp_next = lp_sample(
                                             logits_buf,
                                             gp_cfg.vocab_size as i32,
@@ -2383,6 +2462,10 @@ fn main() {
                                         if (gp_next as i64 == gp_eos) { break; }
                                         let gp_s = decode_tok(gp_m, tok_table,
                                                               tok_count, gp_next);
+                                        gp_tail_len = tail_append(gp_tail, gp_tail_len,
+                                                                  gp_s, 128);
+                                        if (stop_match(gp_tail, gp_tail_len,
+                                                       stop_buf, stop_len)) { break; }
                                         print_token(gp_s);
                                         gp_g = gp_g + 1;
                                         if (gp_g >= gp_n) { break; }
@@ -2404,6 +2487,64 @@ fn main() {
                                 }
                             }
                         }
+                } else if (starts_with(text, "stop")) {
+                    let se = parse_quoted(text, 4, stop_buf, 64);
+                    if (se < 0) {
+                        stop_len = 0;
+                        println("  stop sequence cleared");
+                    } else {
+                        stop_len = 0;
+                        while (stop_buf[stop_len] != 0 as u8) {
+                            stop_len = stop_len + 1;
+                        }
+                        println("  stop sequence set ({stop_len} bytes)");
+                    }
+                } else if (starts_with(text, "mem")) {
+                    println("  heap: {lp_heap_used()} / {lp_heap_max()} bytes");
+                } else if (starts_with(text, "selftest")) {
+                    if (mb_module_count() == 0 as u32) {
+                        println("  no module loaded");
+                    } else {
+                        let tm = mb_module_start(0 as u32) as ptr[u8];
+                        let tc2 = model_config(tm);
+                        let tw = scratch_bytes as ptr[f32];
+                        let ta = activation_buf as ptr[f32];
+                        clear_kv_cache(kv_k_buf, kv_v_buf,
+                                       active_cfg.n_layer, active_cfg.max_seq,
+                                       active_cfg.n_head_kv * active_cfg.head_dim);
+                        var tok_ok: i32 = 0;
+                        if (forward_token_at_pos(tm, tc2, 1, 0,
+                                                 tw, ta, kv_k_buf, kv_v_buf,
+                                                 rope_freqs, logits_buf)) {
+                            if (lp_argmax(logits_buf, tc2.vocab_size as i32) == 9038 as u32) {
+                                tok_ok = 1;
+                            }
+                        }
+                        clear_kv_cache(kv_k_buf, kv_v_buf,
+                                       active_cfg.n_layer, active_cfg.max_seq,
+                                       active_cfg.n_head_kv * active_cfg.head_dim);
+                        let ptoks: [i64; 4] = {9038, 2501, 263, 931};
+                        var prompt_ok: i32 = 1;
+                        for pi in 0..4 {
+                            if (!forward_token_at_pos(tm, tc2, ptoks[pi], pi,
+                                                      tw, ta, kv_k_buf, kv_v_buf,
+                                                      rope_freqs, logits_buf)) {
+                                prompt_ok = 0;
+                                break;
+                            }
+                        }
+                        var prompt_best: u32 = 0;
+                        if (prompt_ok == 1) {
+                            prompt_best = lp_argmax(logits_buf,
+                                                    tc2.vocab_size as i32);
+                        }
+                        if (tok_ok == 1 && prompt_ok == 1
+                                && prompt_best == 29892 as u32) {
+                            println("  selftest PASS (BOS 9038, prompt 29892)");
+                        } else {
+                            println("  selftest FAIL (BOS {tok_ok}, prompt {prompt_best})");
+                        }
+                    }
                 } else if (starts_with(text, "reset") && (text[5] == '\0' || text[5] == ' ')) {
                     clear_kv_cache(kv_k_buf, kv_v_buf,
                                    active_cfg.n_layer, active_cfg.max_seq,
@@ -2429,6 +2570,12 @@ fn main() {
                         println("    genprompt \"text\" [temp] [top_k] [n] - prefill and continue");
                     } else if (starts_with(topic, "bench")) {
                         println("    bench [n] - sequential forward timing");
+                    } else if (starts_with(topic, "stop")) {
+                        println("    stop \"text\" - set a generation stop sequence; stop with no text clears");
+                    } else if (starts_with(topic, "mem")) {
+                        println("    mem - show bump-heap usage and limit");
+                    } else if (starts_with(topic, "selftest")) {
+                        println("    selftest - TinyStories deterministic forward regression");
                     } else if (starts_with(topic, "encode")) {
                         println("    encode <text> - tokenize text");
                     } else if (starts_with(topic, "config")) {
@@ -2437,7 +2584,7 @@ fn main() {
                         println("    no help for that topic");
                     }
                 } else if (starts_with(text, "help")) {
-                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
+                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, stop, mem, selftest, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
                 } else if (line_len > 0) {
                     println("  {text}");
                 }

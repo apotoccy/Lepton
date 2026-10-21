@@ -220,7 +220,8 @@ include:
 - inspection: `info`, `config`, `tensors`, `modules`, `matvec`;
 - tokenizer: `vocab`, `decodetok`, `encode`;
 - generation: `generate [T] [K] [N]`, `genprompt "text" [T] [K] [N]`,
-  `fwdpos`, `forward`; generation stops at EOS or context limit;
+  `stop`, `fwdpos`, `forward`; generation streams tokens and stops at EOS, a
+  stop sequence, Ctrl+C, or the context limit;
 - maintenance: `reset` (KV cache), `reboot` (or Ctrl+Alt+Del), `poweroff`,
   `clear`, `filetest`; the prompt supports history, cursor editing, and tab
   completion.

@@ -15,6 +15,8 @@
 - Tab completion for command names.
 - Colored prompt, `clear`, and `help <command>` topics.
 - `bench` progress markers.
+- Streamed generation, stop sequences, Ctrl+C cancellation, context warnings,
+  `selftest`, and `mem`.
 - Direct Q4_0/Q8_0 matvecs; QEMU baseline improved from ~299.4 to
   ~272.5 ms/token.
 - Q4_K/Q5_K/Q6_K dequantization/matvec, F16/F32 fallbacks, tensor
