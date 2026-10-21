@@ -1,0 +1,86 @@
+# Lepton v0.2.1 Release Validation
+
+Date: 2026-10-21
+
+## Release contents
+
+- Grouped-query attention with a synthetic two-position reference.
+- Multiboot memory-map heap sizing, allocation checks, and low-memory failure.
+- Tokenizer bounds, `<0xNN>` byte fallback, and a working merge-based BPE path.
+- Configurable generation length, EOS stopping, and greedy temperature `0`.
+- GQA, merge-tokenizer, and full-forward reference tooling.
+- Pure GGUF fixture checks in CI.
+
+## Validation matrix
+
+| Check | Result |
+|---|---|
+| `make test` | 134 passed, 0 failed |
+| `make test-sse` | 134 passed, 0 failed |
+| Clean `make all` | Passes |
+| `make -B kernel` | Builds `build/kernel/kernel.elf` |
+| GQA fixture | Reference and kernel both predict token 3 at position 1 |
+| Merge fixture | Reference and kernel both resolve `ab` to token 5 (`▁ab`) |
+| Full forward reference | Predicts token 29892 (`,`) for `Once upon a time` |
+| QEMU 128 MB | Boots; `fwdpos 0 1` returns 9038 (`Once`) |
+| QEMU 32 MB | Boots with a 10.8 MB heap; same prediction |
+| QEMU 24 MB | Clean low-memory fatal message |
+| `pyflakes` / `git diff --check` | Clean |
+
+## Performance baseline
+
+Model: TinyStories-15M, Q4_0 weights, 6 layers, `n_embd=288`, 128-position
+context.
+
+Host: AMD Ryzen 7 5800HS, Ubuntu 6.8 kernel, QEMU 6.2.0, `-m 128`.
+
+```text
+lepton> bench 16
+  bench: 16 tokens in 4790 ms (299.375 ms/token)
+```
+
+With `-m 32`:
+
+```text
+lepton> bench 8
+  bench: 8 tokens in 2390 ms (298.75 ms/token)
+```
+
+`bench [N]` measures sequential forward passes at 100 Hz PIT resolution. It is
+a CPU baseline, not a wall-clock S9 measurement.
+
+## S9 field test
+
+Still required on the Lenovo IdeaPad S9:
+
+1. Build the tagged ISO with `make iso MODEL=models/tinystories.gguf`.
+2. Boot it and run `config`, `fwdpos 0 1`, `bench 8`, and
+   `genprompt "Once upon a time" 0 1 20`.
+3. Record the S9 `bench` result and whether `poweroff` completes.
+
+The host currently has no physical S9 access, so this remains a release
+checklist item rather than a completed validation.
+
+## Known limitations
+
+- `poweroff` prints `powering off...` on the S9 but does not switch it off;
+  reboot and Ctrl+Alt+Del work.
+- Heap cap is 64 MB and the inference workspace budget is 60 MB; models above
+  the TinyStories class do not fit.
+- Context is capped at 256 positions.
+- Q4_K/Q5_K/Q6_K and general F32 linear weights are unsupported.
+- Q4_0, Q8_0, and F32 norms are supported.
+- GQA is implemented and synthetic-tested; no real GQA model has been run.
+- The tokenizer merge path is synthetic-tested; TinyStories has no merges.
+- Generation defaults to 30 tokens and has no streaming or stop-sequence
+  controls beyond EOS.
+- No command history or scrollback.
+- 299 ms/token is the QEMU baseline; S9 performance is expected to be slower.
+
+## Next-phase priorities
+
+1. S9 benchmark and poweroff investigation (ACPI/APM).
+2. K-quant support for broader GGUF compatibility.
+3. Real GQA and merge-tokenizer model validation.
+4. Streaming generation and stop sequences.
+5. Larger-context / lower-memory inference work.

@@ -1082,7 +1082,7 @@ fn main() {
     println("[7] Enabling interrupts");
     interrupts_init();
     println("    timer at 100 Hz, keyboard ready");
-    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, gqapair, generate [T] [K] [N], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, filetest, help");
+    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, filetest, help");
     println("");
 
     var line_buf = alloc([u8; 128]) as ptr[u8];
@@ -1364,6 +1364,42 @@ fn main() {
                             print("  '");
                             print_token(fwd_str);
                             println("'");
+                        }
+                    }
+                } else if (starts_with(text, "bench")) {
+                    if (mb_module_count() == 0 as u32) {
+                        println("  no module loaded");
+                    } else {
+                        let bn_m = mb_module_start(0 as u32) as ptr[u8];
+                        let bn_cfg = model_config(bn_m);
+                        let bn_n_arg = parse_int_at(text, 5);
+                        var bn_n: i64 = 8;
+                        if (bn_n_arg > 0) { bn_n = bn_n_arg; }
+                        if (bn_n > bn_cfg.max_seq) { bn_n = bn_cfg.max_seq; }
+                        clear_kv_cache(kv_k_buf, kv_v_buf,
+                                       active_cfg.n_layer,
+                                       active_cfg.max_seq,
+                                       active_cfg.n_head_kv * active_cfg.head_dim);
+                        let bn_t0 = ticks();
+                        var bn_ok: i32 = 1;
+                        var bn_i: i64 = 0;
+                        while (bn_i < bn_n) {
+                            if (!forward_token_at_pos(bn_m, bn_cfg, 1,
+                                                      bn_i,
+                                                      scratch_bytes as ptr[f32],
+                                                      activation_buf,
+                                                      kv_k_buf, kv_v_buf,
+                                                      rope_freqs, logits_buf)) {
+                                bn_ok = 0;
+                                break;
+                            }
+                            bn_i = bn_i + 1;
+                        }
+                        let bn_t1 = ticks();
+                        if (bn_ok == 1) {
+                            let bn_ms = (bn_t1 - bn_t0) as i64 * 10;
+                            let bn_per = bn_ms as f64 / bn_n as f64;
+                            println("  bench: {bn_n} tokens in {bn_ms} ms ({bn_per} ms/token)");
                         }
                     }
                 } else if (starts_with(text, "gqapair")) {
@@ -1661,7 +1697,7 @@ fn main() {
                     let wr = write_file("test.bin", fbuf, 4);
                     println("  file_size={fs} read={rd} write={wr}");
                 } else if (starts_with(text, "help")) {
-                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, gqapair, generate [T] [K] [N], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, filetest, help");
+                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, filetest, help");
                 } else if (line_len > 0) {
                     println("  {text}");
                 }

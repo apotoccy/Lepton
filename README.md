@@ -9,7 +9,7 @@ The reference target is a 15M-parameter TinyStories model. The kernel boots on a
 2008 Lenovo IdeaPad S9 (Intel Atom) and in QEMU; the same kernel can be packaged
 as a GRUB ISO.
 
-## Status (as of October 2026)
+## Status (as of October 2026, v0.2.1)
 
 - **Compiler:** 134/134 regression tests pass with both the scalar and x86-64
   SSE2 targets (`make test`, `make test-sse`), plus 13 IR-verifier and 12
@@ -327,7 +327,16 @@ encode ab
 
 Both should resolve to token **5** (`▁ab`).
 
-### 7. Validate the full forward reference
+### 7. Measure forward latency
+
+```text
+bench 16
+```
+
+`bench [N]` reports sequential forward time from the 100 Hz PIT. See
+[RELEASE.md](RELEASE.md) for the current baseline.
+
+### 8. Validate the full forward reference
 
 With `models/tinystories.gguf` present:
 

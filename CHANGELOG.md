@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — v0.2.1
+## v0.2.1 — 2026-10-21
 
 Tooling and validation release.
 
@@ -22,6 +22,14 @@ Tooling and validation release.
 - Merge-tokenizer fixture and reference.
 - Pure GGUF fixture checks in CI.
 - Kernel build and both compiler test suites remain in CI.
+
+### Validation
+
+- 134 compiler tests passed on scalar and SSE2 targets.
+- GQA, merge-tokenizer, and full-forward references pass.
+- QEMU 128 MB and 32 MB boot and inference verified.
+- QEMU baseline: about 299 ms/token for TinyStories.
+- S9 field test remains pending.
 
 ### Breaking changes
 
