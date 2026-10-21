@@ -240,8 +240,9 @@ tensors, not the 15M model label.
 
 - [ ] Add per-phase timing (using `ticks()`) and a baseline tokens/sec
       measurement in QEMU and on the S9
-- [ ] Implement Q4_0/Q8_0 dot products directly against f32 activations,
-      keeping the block form throughout the hot path
+- [x] Implement Q4_0/Q8_0 dot products directly against f32 activations,
+      keeping the block form throughout the hot path; QEMU improved from
+      ~299.4 to ~272.5 ms/token
 - [ ] If a cache is used, budget explicitly: layers ≈24 MB, output ≈37 MB,
       embedding rows only; raise and validate the heap before allocating
 - [ ] Vectorize `matvec`, `rmsnorm`, `softmax`, and `silu` with `v4f32`

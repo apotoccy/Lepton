@@ -29,7 +29,8 @@ as a GRUB ISO.
 ## Key features
 
 - **Bare-metal AI:** runs a GGUF model directly on the CPU with no underlying OS
-  and no ML framework.
+  and no ML framework. Q4_0/Q8_0 matvecs consume quantized blocks directly, so
+  linear layers do not dequantize full weight matrices on every token.
 - **Custom compiler pipeline:** lexer/parser → typed flat IR → verification →
   C11, with source spans and one lowering pipeline.
 - **IR verification:** every lowered module is checked for well-typed operands,

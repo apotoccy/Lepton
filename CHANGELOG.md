@@ -15,6 +15,8 @@
 - Tab completion for command names.
 - Colored prompt, `clear`, and `help <command>` topics.
 - `bench` progress markers.
+- Direct Q4_0/Q8_0 matvecs; QEMU baseline improved from ~299.4 to
+  ~272.5 ms/token.
 
 ## v0.2.1 — 2026-10-21
 

@@ -265,6 +265,65 @@ fn copy_f32_tensor(model: ptr[u8], data_start: i64,
     }
 }
 
+
+fn matvec_q4_0(model: ptr[u8], data_start: i64,
+               t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
+               rows: i64, cols: i64) -> void {
+    let blocks = cols / 32;
+    let row_bytes = blocks * 18;
+    let base = (model + data_start + (t.data_offset as i64)) as ptr[u8];
+    for r in 0..rows {
+        var acc: f32 = 0.0f;
+        let row = base + r * row_bytes;
+        for b in 0..blocks {
+            let block = row + b * 18;
+            let d = read_f16(block, 0);
+            let qs = block + 2;
+            for j in 0..16 {
+                let byte = qs[j];
+                let lo = ((byte & 0x0F as u8) as i32) - 8;
+                let hi = (((byte >> 4 as u8) & 0x0F as u8) as i32) - 8;
+                acc = acc + x[b * 32 + j] * d * (lo as f32);
+                acc = acc + x[b * 32 + j + 16] * d * (hi as f32);
+            }
+        }
+        y[r] = acc;
+    }
+}
+
+fn matvec_q8_0(model: ptr[u8], data_start: i64,
+               t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
+               rows: i64, cols: i64) -> void {
+    let blocks = cols / 32;
+    let row_bytes = blocks * 34;
+    let base = (model + data_start + (t.data_offset as i64)) as ptr[u8];
+    for r in 0..rows {
+        var acc: f32 = 0.0f;
+        let row = base + r * row_bytes;
+        for b in 0..blocks {
+            let block = row + b * 34;
+            let d = read_f16(block, 0);
+            let qs = (block + 2) as ptr[i8];
+            for j in 0..32 {
+                acc = acc + x[b * 32 + j] * d * (qs[j] as f32);
+            }
+        }
+        y[r] = acc;
+    }
+}
+
+fn matvec_tensor(model: ptr[u8], data_start: i64,
+                 t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
+                 rows: i64, cols: i64) -> void {
+    if (t.ggml_type == 2 as u32) {
+        matvec_q4_0(model, data_start, t, x, y, rows, cols);
+    } else if (t.ggml_type == 8 as u32) {
+        matvec_q8_0(model, data_start, t, x, y, rows, cols);
+    } else {
+        panic("unsupported weight type in matvec");
+    }
+}
+
 fn rmsnorm_n(x: ptr[f32], w: ptr[f32], out: ptr[f32], n: i64,
               eps: f32) -> void {
     var ss: f32 = 0.0f;
@@ -399,16 +458,16 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
 
         /* Q, K, V */
         let aq_t = tensor_by_name(model, tstart, tc, "blk.{layer}.attn_q.weight");
-        dequant_tensor_q4_0(model, data_start, aq_t, wbuf);
-        matvec_rows(wbuf, normed, q_buf, n_embd, n_embd);
+        matvec_tensor(model, data_start, aq_t, normed, q_buf,
+                      n_embd, n_embd);
 
         let ak_t = tensor_by_name(model, tstart, tc, "blk.{layer}.attn_k.weight");
-        dequant_tensor_q4_0(model, data_start, ak_t, wbuf);
-        matvec_rows(wbuf, normed, k_buf, kv_dim, n_embd);
+        matvec_tensor(model, data_start, ak_t, normed, k_buf,
+                      kv_dim, n_embd);
 
         let av_t = tensor_by_name(model, tstart, tc, "blk.{layer}.attn_v.weight");
-        dequant_tensor_q4_0(model, data_start, av_t, wbuf);
-        matvec_rows(wbuf, normed, v_buf, kv_dim, n_embd);
+        matvec_tensor(model, data_start, av_t, normed, v_buf,
+                      kv_dim, n_embd);
 
         /* RoPE (identity at pos=0) */
         rope_apply(q_buf, pos, freqs, n_head, head_dim);
@@ -450,8 +509,8 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
 
         /* attn_out = Wo @ attended */
         let ao_t = tensor_by_name(model, tstart, tc, "blk.{layer}.attn_output.weight");
-        dequant_tensor_q4_0(model, data_start, ao_t, wbuf);
-        matvec_rows(wbuf, attended, attn_out, n_embd, n_embd);
+        matvec_tensor(model, data_start, ao_t, attended, attn_out,
+                      n_embd, n_embd);
 
         for i in 0..n_embd {
             hidden[i] = hidden[i] + attn_out[i];
@@ -464,20 +523,20 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
 
         /* FFN */
         let fg_t = tensor_by_name(model, tstart, tc, "blk.{layer}.ffn_gate.weight");
-        dequant_tensor_q4_0(model, data_start, fg_t, wbuf);
-        matvec_rows(wbuf, normed, gate, n_ff, n_embd);
+        matvec_tensor(model, data_start, fg_t, normed, gate,
+                      n_ff, n_embd);
 
         let fu_t = tensor_by_name(model, tstart, tc, "blk.{layer}.ffn_up.weight");
-        dequant_tensor_q4_0(model, data_start, fu_t, wbuf);
-        matvec_rows(wbuf, normed, up, n_ff, n_embd);
+        matvec_tensor(model, data_start, fu_t, normed, up,
+                      n_ff, n_embd);
 
         for i in 0..n_ff {
             silu_gate[i] = silu_f32(gate[i]) * up[i];
         }
 
         let fd_t = tensor_by_name(model, tstart, tc, "blk.{layer}.ffn_down.weight");
-        dequant_tensor_q4_0(model, data_start, fd_t, wbuf);
-        matvec_rows(wbuf, silu_gate, down, n_embd, n_ff);
+        matvec_tensor(model, data_start, fd_t, silu_gate, down,
+                      n_embd, n_ff);
 
         for i in 0..n_embd {
             hidden[i] = hidden[i] + down[i];

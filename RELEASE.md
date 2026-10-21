@@ -39,14 +39,14 @@ Host: AMD Ryzen 7 5800HS, Ubuntu 6.8 kernel, QEMU 6.2.0, `-m 128`.
 
 ```text
 lepton> bench 16
-  bench: 16 tokens in 4790 ms (299.375 ms/token)
+  bench: 16 tokens in 4360 ms (272.5 ms/token)
 ```
 
 With `-m 32`:
 
 ```text
 lepton> bench 8
-  bench: 8 tokens in 2390 ms (298.75 ms/token)
+  bench: 8 tokens in 2240 ms (280 ms/token)
 ```
 
 `bench [N]` measures sequential forward passes at 100 Hz PIT resolution. It is
@@ -84,7 +84,8 @@ checklist item rather than a completed validation.
 - Generation defaults to 30 tokens and has no streaming or stop-sequence
   controls beyond EOS.
 - No scrollback; command history is limited to eight entries.
-- 299 ms/token is the QEMU baseline; S9 performance is expected to be slower.
+- 272.5 ms/token is the current QEMU baseline (about 9% faster than the
+  previous 299.4 ms/token); S9 performance is expected to be slower.
 
 ## Next-phase priorities
 
