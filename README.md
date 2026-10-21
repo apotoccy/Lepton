@@ -440,8 +440,8 @@ These are the boundaries of the current implementation, not a wish list; see
   fixture; piece buffers and vocab/count checks are bounded, and unknown bytes
   map to GGUF `<0xNN>` tokens when present.
 - **Generation controls.** Stop sequences match decoded text after
-  normalizing the sentencepiece marker to a space. `selftest` is specific to
-  the TinyStories reference token IDs.
+  normalizing the sentencepiece/GPT-2 space markers. `selftest` has profiles
+  for TinyStories and SmolLM2; other models are skipped.
 - **One backend.** Only scalar and x86-64 SSE2 are implemented. There is no
   AVX2, NEON/ARM, LLVM IR, or WASM backend yet.
 

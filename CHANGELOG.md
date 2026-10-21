@@ -5,7 +5,8 @@
 - Fixed REPL backspace echo: `\b` is not a Lepton string escape, so the raw
   backspace character is emitted directly instead of printing `b b`.
 - Added SmolLM2-135M compatibility: GPT-2 byte-level tokenizer, BOS handling,
-  tied token embedding/output, GQA 9/3, and a 256-position context cap.
+  tied token embedding/output, GQA 9/3, configurable RoPE base (100000), a
+  256-position context cap, and a SmolLM `selftest` profile.
 - Added `MODELS.md` with TinyStories and SmolLM2 profiles and test recipes.
 
 ## v0.3.0 — 2026-10-21

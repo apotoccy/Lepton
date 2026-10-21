@@ -32,6 +32,7 @@ struct ModelConfig {
     max_seq: i64;
     vocab_size: i64;
     rms_eps: f32;
+    rope_base: f32;
 }
 
 fn config_u32(model: ptr[u8], kv_count: u64, key: str,
@@ -180,6 +181,10 @@ fn load_model_config(model: ptr[u8], tstart: i64) -> ModelConfig {
         max_seq = 256;
     }
 
+    var rope_base = config_f32_arch(model, kv_count, arch,
+                                    "rope.freq_base", 10000.0f);
+    if (rope_base <= 0.0f) { rope_base = 10000.0f; }
+
     var rms_eps = config_f32_arch(
         model, kv_count, arch,
         "attention.layer_norm_rms_epsilon", -1.0f);
@@ -205,5 +210,6 @@ fn load_model_config(model: ptr[u8], tstart: i64) -> ModelConfig {
         max_seq: max_seq,
         vocab_size: vocab_size,
         rms_eps: rms_eps,
+        rope_base: rope_base,
     );
 }

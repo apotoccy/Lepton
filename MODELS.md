@@ -46,6 +46,7 @@ selftest         -> PASS
 - Weights: Q4_0/Q8_0/F32 norms
 - Tokenizer: GPT-2 byte-level BPE
 - Tied token embedding/output
+- RoPE base: 100000
 - BOS = EOS = 0
 
 Use it for:
@@ -71,6 +72,7 @@ config
   max_seq   = 256
   vocab     = 49152
   inference = supported
+  rope_base = 100000
 ```
 
 Tokenizer check:
@@ -90,10 +92,11 @@ genprompt "Once upon a time" 0 1 3
   , there was
 ```
 
-`selftest` is TinyStories-specific and prints:
+`selftest` recognizes the SmolLM2 profile:
 
 ```text
-selftest skipped (TinyStories reference only)
+selftest
+  selftest PASS (SmolLM BOS 29, prompt 28)
 ```
 
 QEMU latency measured on the reference host:

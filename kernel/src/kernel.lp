@@ -155,7 +155,7 @@ fn default_model_config() -> ModelConfig {
         architecture: "llama",
         n_embd: 288, n_ff: 768, n_layer: 6, n_head: 6,
         n_head_kv: 6, head_dim: 48, max_seq: 128,
-        vocab_size: 32000, rms_eps: 1e-5f,
+        vocab_size: 32000, rms_eps: 1e-5f, rope_base: 10000.0f,
     );
 }
 
@@ -198,6 +198,7 @@ fn config_issue(cfg: ModelConfig) -> str {
     }
     if (cfg.vocab_size <= 0) { return "invalid vocabulary size"; }
     if (cfg.rms_eps <= 0.0f) { return "invalid RMS epsilon"; }
+    if (cfg.rope_base <= 0.0f) { return "invalid RoPE base"; }
     return "";
 }
 
@@ -251,6 +252,7 @@ fn print_model_config(cfg: ModelConfig) -> void {
     println("  max_seq   = {cfg.max_seq}");
     println("  vocab     = {cfg.vocab_size}");
     println("  rms_eps   = {cfg.rms_eps}");
+    println("  rope_base = {cfg.rope_base}");
 }
 
 fn dequant_row_q4_0(model: ptr[u8], data_start: i64,
@@ -705,12 +707,16 @@ fn silu_f32(x: f32) -> f32 {
     return x / (1.0f + exp(0.0f - x));
 }
 
-fn build_rope_freqs(freqs: ptr[f64], head_dim: i64) -> void {
-    /* freqs[i] = 10000^(-2i/head_dim) for i in 0..head_dim/2 */
-    let ln_10000: f64 = 9.210340371976184;
+fn build_rope_freqs(freqs: ptr[f64], head_dim: i64,
+                    base: f32) -> void {
+    /* freqs[i] = base^(-2i/head_dim). */
+    var ln_base: f64 = 9.210340371976184;      /* ln(10000) */
+    if (base > 50000.0f) {
+        ln_base = 11.512925464970229;          /* ln(100000) */
+    }
     let half = head_dim / 2;
     for i in 0..half {
-        let exponent: f64 = (0.0 - 2.0) * (i as f64) / (head_dim as f64) * ln_10000;
+        let exponent: f64 = (0.0 - 2.0) * (i as f64) / (head_dim as f64) * ln_base;
         freqs[i] = exp(exponent);
     }
 }
@@ -1791,7 +1797,7 @@ fn main() {
     let logits_buf = alloc_or_panic(active_cfg.vocab_size * 4) as ptr[f32];
     let merge_table = alloc_or_panic(65536 * 4) as ptr[u32];
     var merge_count: i64 = -1;
-    build_rope_freqs(rope_freqs, active_cfg.head_dim);
+    build_rope_freqs(rope_freqs, active_cfg.head_dim, active_cfg.rope_base);
     println("[7] Enabling interrupts");
     interrupts_init();
     println("    timer at 100 Hz, keyboard ready");
@@ -2624,46 +2630,80 @@ fn main() {
                     } else {
                         let tm = mb_module_start(0 as u32) as ptr[u8];
                         let tc2 = model_config(tm);
-                        if (tc2.n_embd != 288 as i64) {
-                            println("  selftest skipped (TinyStories reference only)");
-                        } else {
                         let tw = scratch_bytes as ptr[f32];
                         let ta = activation_buf as ptr[f32];
-                        clear_kv_cache(kv_k_buf, kv_v_buf,
-                                       active_cfg.n_layer, active_cfg.max_seq,
-                                       active_cfg.n_head_kv * active_cfg.head_dim);
-                        var tok_ok: i32 = 0;
-                        if (forward_token_at_pos(tm, tc2, 1, 0,
-                                                 tw, ta, kv_k_buf, kv_v_buf,
-                                                 rope_freqs, logits_buf)) {
-                            if (lp_argmax(logits_buf, tc2.vocab_size as i32) == 9038 as u32) {
-                                tok_ok = 1;
+                        if (tc2.n_embd == 288 as i64 && tc2.n_layer == 6 as i64) {
+                            clear_kv_cache(kv_k_buf, kv_v_buf,
+                                           active_cfg.n_layer, active_cfg.max_seq,
+                                           active_cfg.n_head_kv * active_cfg.head_dim);
+                            var tok_ok: i32 = 0;
+                            if (forward_token_at_pos(tm, tc2, 1, 0,
+                                                     tw, ta, kv_k_buf, kv_v_buf,
+                                                     rope_freqs, logits_buf)) {
+                                if (lp_argmax(logits_buf, tc2.vocab_size as i32) == 9038 as u32) {
+                                    tok_ok = 1;
+                                }
                             }
-                        }
-                        clear_kv_cache(kv_k_buf, kv_v_buf,
-                                       active_cfg.n_layer, active_cfg.max_seq,
-                                       active_cfg.n_head_kv * active_cfg.head_dim);
-                        let ptoks: [i64; 4] = {9038, 2501, 263, 931};
-                        var prompt_ok: i32 = 1;
-                        for pi in 0..4 {
-                            if (!forward_token_at_pos(tm, tc2, ptoks[pi], pi,
-                                                      tw, ta, kv_k_buf, kv_v_buf,
-                                                      rope_freqs, logits_buf)) {
-                                prompt_ok = 0;
-                                break;
+                            clear_kv_cache(kv_k_buf, kv_v_buf,
+                                           active_cfg.n_layer, active_cfg.max_seq,
+                                           active_cfg.n_head_kv * active_cfg.head_dim);
+                            let ptoks: [i64; 4] = {9038, 2501, 263, 931};
+                            var prompt_ok: i32 = 1;
+                            for pi in 0..4 {
+                                if (!forward_token_at_pos(tm, tc2, ptoks[pi], pi,
+                                                          tw, ta, kv_k_buf, kv_v_buf,
+                                                          rope_freqs, logits_buf)) {
+                                    prompt_ok = 0;
+                                    break;
+                                }
                             }
-                        }
-                        var prompt_best: u32 = 0;
-                        if (prompt_ok == 1) {
-                            prompt_best = lp_argmax(logits_buf,
-                                                    tc2.vocab_size as i32);
-                        }
-                        if (tok_ok == 1 && prompt_ok == 1
-                                && prompt_best == 29892 as u32) {
-                            println("  selftest PASS (BOS 9038, prompt 29892)");
+                            var prompt_best: u32 = 0;
+                            if (prompt_ok == 1) {
+                                prompt_best = lp_argmax(logits_buf,
+                                                        tc2.vocab_size as i32);
+                            }
+                            if (tok_ok == 1 && prompt_ok == 1
+                                    && prompt_best == 29892 as u32) {
+                                println("  selftest PASS (TinyStories BOS 9038, prompt 29892)");
+                            } else {
+                                println("  selftest FAIL (TinyStories BOS {tok_ok}, prompt {prompt_best})");
+                            }
+                        } else if (tc2.n_embd == 576 as i64 && tc2.n_layer == 30 as i64) {
+                            clear_kv_cache(kv_k_buf, kv_v_buf,
+                                           active_cfg.n_layer, active_cfg.max_seq,
+                                           active_cfg.n_head_kv * active_cfg.head_dim);
+                            var bos_ok: i32 = 0;
+                            if (forward_token_at_pos(tm, tc2, 0, 0,
+                                                     tw, ta, kv_k_buf, kv_v_buf,
+                                                     rope_freqs, logits_buf)) {
+                                if (lp_argmax(logits_buf, tc2.vocab_size as i32) == 29 as u32) {
+                                    bos_ok = 1;
+                                }
+                            }
+                            clear_kv_cache(kv_k_buf, kv_v_buf,
+                                           active_cfg.n_layer, active_cfg.max_seq,
+                                           active_cfg.n_head_kv * active_cfg.head_dim);
+                            let stoks: [i64; 5] = {0, 6403, 1980, 253, 655};
+                            var s_ok: i32 = 1;
+                            for si in 0..5 {
+                                if (!forward_token_at_pos(tm, tc2, stoks[si], si,
+                                                          tw, ta, kv_k_buf, kv_v_buf,
+                                                          rope_freqs, logits_buf)) {
+                                    s_ok = 0;
+                                    break;
+                                }
+                            }
+                            var s_best: u32 = 0;
+                            if (s_ok == 1) {
+                                s_best = lp_argmax(logits_buf, tc2.vocab_size as i32);
+                            }
+                            if (bos_ok == 1 && s_ok == 1 && s_best == 28 as u32) {
+                                println("  selftest PASS (SmolLM BOS 29, prompt 28)");
+                            } else {
+                                println("  selftest FAIL (SmolLM BOS {bos_ok}, prompt {s_best})");
+                            }
                         } else {
-                            println("  selftest FAIL (BOS {tok_ok}, prompt {prompt_best})");
-                        }
+                            println("  selftest skipped (unrecognized model profile)");
                         }
                     }
                 } else if (starts_with(text, "reset") && (text[5] == '\0' || text[5] == ' ')) {

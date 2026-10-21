@@ -86,6 +86,7 @@ Check GitHub's Git LFS storage and bandwidth quotas before doing this.
 - Quantization: Q4_0 linear layers, Q8_0 token embedding, F32 norms
 - Tokenizer: GPT-2 byte-level BPE
 - Tied output embedding
+- RoPE base: 100000
 - BOS = EOS = 0
 
 ## Use the realistic profile

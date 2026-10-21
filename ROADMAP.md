@@ -267,6 +267,7 @@ tensors, not the 15M model label.
       two-position synthetic GQA reference
 - [x] Validate real GQA with SmolLM2-135M (9/3 heads)
 - [x] Add GPT-2 byte-level tokenizer support and tied output embeddings
+- [x] Parse model-specific RoPE frequency base and validate SmolLM in `selftest`
 - [x] Add Q4_K dequantization and direct matvec, plus F16/F32 fallbacks
 - [x] Add Q5_K/Q6_K dequantization and direct matvecs
 - [ ] Plan memory for 1B+ models. They do not fit the current 64 MB heap;
