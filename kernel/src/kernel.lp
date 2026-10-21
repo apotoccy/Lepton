@@ -90,6 +90,31 @@ fn build_tok_offsets(model: ptr[u8], tok_table: ptr[u32],
     return count as i64;
 }
 
+fn token_id_exact(model: ptr[u8], tok_table: ptr[u32],
+                  tok_count: i64, name: str) -> i64 {
+    var n: i64 = 0;
+    while (name[n] != '\0') { n = n + 1; }
+    var tok: i64 = 0;
+    while (tok < tok_count) {
+        let toff = tok_table[tok] as i64;
+        let tlen = read_u64(model, toff) as i64;
+        if (tlen == n) {
+            var i: i64 = 0;
+            var same: bool = true;
+            while (i < n) {
+                if (read_u8(model, toff + 8 + i) != name[i] as u8) {
+                    same = false;
+                    break;
+                }
+                i = i + 1;
+            }
+            if (same) { return tok; }
+        }
+        tok = tok + 1;
+    }
+    return -1;
+}
+
 fn decode_tok(model: ptr[u8], tok_table: ptr[u32], tok_count: i64,
               tok_id: u32) -> str {
     if (tok_id as i64 >= tok_count) {
@@ -1597,6 +1622,37 @@ fn generation_cancelled() -> bool {
     return kbd_cancel_pending() != 0 as u32;
 }
 
+fn append_encoded(model: ptr[u8], tok_table: ptr[u32], tok_count: i64,
+                  merge_table: ptr[u32], merge_count: i64,
+                  text_buf: ptr[u8], start: i64, end: i64,
+                  out: ptr[u32], pos: i64, max_pos: i64) -> i64 {
+    let tmp = alloc([u32; 256]) as ptr[u32];
+    let n = encode_prompt_dispatch(model, tok_table, tok_count,
+                                   merge_table, merge_count,
+                                   text_buf, start, end, tmp);
+    var i: i64 = 0;
+    var p = pos;
+    while (i < n && p < max_pos) {
+        out[p] = tmp[i];
+        p = p + 1;
+        i = i + 1;
+    }
+    return p;
+}
+
+fn ask_text(seg: ptr[u8], text: str, extra_nl: bool) -> i64 {
+    var n: i64 = 0;
+    while (text[n] != '\0') {
+        seg[n] = text[n] as u8;
+        n = n + 1;
+    }
+    if (extra_nl) {
+        seg[n] = 10 as u8;
+        n = n + 1;
+    }
+    return n;
+}
+
 fn main() {
     serial_init();
     vga_init();
@@ -1801,7 +1857,7 @@ fn main() {
     println("[7] Enabling interrupts");
     interrupts_init();
     println("    timer at 100 Hz, keyboard ready");
-    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, stop, mem, selftest, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
+    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, ask [n], stop, mem, selftest, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
     println("");
 
     var line_buf = alloc([u8; 128]) as ptr[u8];
@@ -2610,6 +2666,142 @@ fn main() {
                                 }
                             }
                         }
+                } else if (starts_with(text, "ask")) {
+                    if (mb_module_count() == 0 as u32) {
+                        println("  no module loaded");
+                    } else {
+                        let q_buf = alloc([u8; 256]) as ptr[u8];
+                        let q_end = parse_quoted(text, 3, q_buf, 256);
+                        if (q_end < 0) {
+                            println("  usage: ask \"question\" [n]");
+                        } else {
+                            let q_m = mb_module_start(0 as u32) as ptr[u8];
+                            let q_cfg = model_config(q_m);
+                            if (tok_count < 0) {
+                                tok_count = build_tok_offsets(q_m, tok_table,
+                                                              q_cfg.vocab_size);
+                            }
+                            if (merge_count < 0) {
+                                merge_count = build_merge_offsets(q_m, merge_table);
+                                if (merge_count < 0) { merge_count = 0; }
+                            }
+                            let im_start = token_id_exact(q_m, tok_table, tok_count,
+                                                          "<|im_start|>");
+                            let im_end = token_id_exact(q_m, tok_table, tok_count,
+                                                        "<|im_end|>");
+                            if (im_start < 0 || im_end < 0) {
+                                println("  this model has no ChatML tokens");
+                            } else {
+                                let q_n_arg = parse_int_at(text, q_end);
+                                var q_n: i64 = 32;
+                                if (q_n_arg > 0) { q_n = q_n_arg; }
+                                let q_ids = alloc([u32; 512]) as ptr[u32];
+                                let q_seg = alloc([u8; 256]) as ptr[u8];
+                                var qp: i64 = 0;
+                                q_ids[qp] = im_start as u32; qp = qp + 1;
+                                let sl = ask_text(q_seg, "system", true);
+                                qp = append_encoded(q_m, tok_table, tok_count,
+                                                    merge_table, merge_count,
+                                                    q_seg, 0 as i64, sl,
+                                                    q_ids, qp, 512);
+                                let sys = "You are a helpful AI assistant named SmolLM, trained by Hugging Face";
+                                var sy: i64 = 0;
+                                while (sys[sy] != '\0') {
+                                    q_seg[sy] = sys[sy] as u8;
+                                    sy = sy + 1;
+                                }
+                                qp = append_encoded(q_m, tok_table, tok_count,
+                                                    merge_table, merge_count,
+                                                    q_seg, 0 as i64, sy,
+                                                    q_ids, qp, 512);
+                                q_ids[qp] = im_end as u32; qp = qp + 1;
+                                let snl = ask_text(q_seg, "", true);
+                                qp = append_encoded(q_m, tok_table, tok_count,
+                                                    merge_table, merge_count,
+                                                    q_seg, 0 as i64, snl,
+                                                    q_ids, qp, 512);
+                                q_ids[qp] = im_start as u32; qp = qp + 1;
+                                let ul = ask_text(q_seg, "user", true);
+                                qp = append_encoded(q_m, tok_table, tok_count,
+                                                    merge_table, merge_count,
+                                                    q_seg, 0 as i64, ul,
+                                                    q_ids, qp, 512);
+                                var qi: i64 = 0;
+                                while (q_buf[qi] != 0 as u8) { qi = qi + 1; }
+                                qp = append_encoded(q_m, tok_table, tok_count,
+                                                    merge_table, merge_count,
+                                                    q_buf, 0 as i64, qi,
+                                                    q_ids, qp, 512);
+                                q_ids[qp] = im_end as u32; qp = qp + 1;
+                                let nl = ask_text(q_seg, "", true);
+                                qp = append_encoded(q_m, tok_table, tok_count,
+                                                    merge_table, merge_count,
+                                                    q_seg, 0 as i64, nl,
+                                                    q_ids, qp, 512);
+                                q_ids[qp] = im_start as u32; qp = qp + 1;
+                                let al = ask_text(q_seg, "assistant", true);
+                                qp = append_encoded(q_m, tok_table, tok_count,
+                                                    merge_table, merge_count,
+                                                    q_seg, 0 as i64, al,
+                                                    q_ids, qp, 512);
+
+                                let remaining = q_cfg.max_seq - qp;
+                                if (remaining <= 0) {
+                                    println("  inference error: ChatML prompt fills the context");
+                                } else {
+                                    if (q_n > remaining) { q_n = remaining; }
+                                    clear_kv_cache(kv_k_buf, kv_v_buf,
+                                                   active_cfg.n_layer, active_cfg.max_seq,
+                                                   active_cfg.n_head_kv * active_cfg.head_dim);
+                                    var q_ok: i32 = 1;
+                                    var q_pos: i64 = 0;
+                                    while (q_pos < qp) {
+                                        if (!forward_token_at_pos(q_m, q_cfg,
+                                                                  q_ids[q_pos] as i64,
+                                                                  q_pos,
+                                                                  scratch_bytes as ptr[f32],
+                                                                  activation_buf,
+                                                                  kv_k_buf, kv_v_buf,
+                                                                  rope_freqs, logits_buf)) {
+                                            q_ok = 0;
+                                            break;
+                                        }
+                                        q_pos = q_pos + 1;
+                                    }
+                                    if (q_ok == 1) {
+                                        let q_eos = model_eos(q_m);
+                                        println("  asking ({qp} prompt tokens)...");
+                                        print("  ");
+                                        var q_g: i64 = 0;
+                                        while (q_g < q_n && q_pos < q_cfg.max_seq) {
+                                            if (generation_cancelled()) { break; }
+                                            let q_next = lp_sample(logits_buf,
+                                                                   q_cfg.vocab_size as i32,
+                                                                   0.0f, 1);
+                                            if (q_next as i64 == q_eos
+                                                    || q_next as i64 == im_end) { break; }
+                                            let q_s = decode_tok(q_m, tok_table,
+                                                                 tok_count, q_next);
+                                            print_token(q_s);
+                                            q_g = q_g + 1;
+                                            if (q_g >= q_n) { break; }
+                                            if (!forward_token_at_pos(q_m, q_cfg,
+                                                                      q_next as i64,
+                                                                      q_pos,
+                                                                      scratch_bytes as ptr[f32],
+                                                                      activation_buf,
+                                                                      kv_k_buf, kv_v_buf,
+                                                                      rope_freqs, logits_buf)) {
+                                                break;
+                                            }
+                                            q_pos = q_pos + 1;
+                                        }
+                                        println("");
+                                    }
+                                }
+                            }
+                        }
+                    }
                 } else if (starts_with(text, "stop")) {
                     let se = parse_quoted(text, 4, stop_buf, 64);
                     if (se < 0) {
@@ -2731,6 +2923,8 @@ fn main() {
                         println("    genprompt \"text\" [temp] [top_k] [n] - prefill and continue");
                     } else if (starts_with(topic, "bench")) {
                         println("    bench [n] - sequential forward timing");
+                    } else if (starts_with(topic, "ask")) {
+                        println("    ask \"question\" [n] - ChatML question for SmolLM2 Instruct");
                     } else if (starts_with(topic, "stop")) {
                         println("    stop \"text\" - set a generation stop sequence; stop with no text clears");
                     } else if (starts_with(topic, "mem")) {
@@ -2745,7 +2939,7 @@ fn main() {
                         println("    no help for that topic");
                     }
                 } else if (starts_with(text, "help")) {
-                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, stop, mem, selftest, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
+                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, ask [n], stop, mem, selftest, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
                 } else if (line_len > 0) {
                     println("  {text}");
                 }

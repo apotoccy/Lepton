@@ -103,8 +103,8 @@ as a GRUB ISO.
   interrupts, PS/2 controller initialization (scancode set 1), IRQ1 plus a
   polling fallback, and a line-edited REPL with colored prompts, eight-entry
   history, cursor editing, tab completion, help topics, `stop` sequences,
-  Ctrl+C cancellation, `selftest`, `mem`, `clear`, `reset`, `reboot`,
-  `poweroff`, Ctrl+Alt+Del, and ACPI shutdown. Expected
+  Ctrl+C cancellation, `ask` ChatML questions, `selftest`, `mem`, `clear`,
+  `reset`, `reboot`, `poweroff`, Ctrl+Alt+Del, and ACPI shutdown. Expected
   inference/configuration errors return to the prompt; fatal panics print a
   reboot hint.
 - **Verified target:** TinyStories-15M on a 2008 Lenovo IdeaPad S9 (Intel Atom),
@@ -442,6 +442,9 @@ These are the boundaries of the current implementation, not a wish list; see
 - **Generation controls.** Stop sequences match decoded text after
   normalizing the sentencepiece/GPT-2 space markers. `selftest` has profiles
   for TinyStories and SmolLM2; other models are skipped.
+- **Q&A.** `ask` uses SmolLM2 Instruct ChatML (`<|im_start|>` /
+  `<|im_end|>`) and requires an Instruct GGUF. The base `smallm.gguf` is for
+  completion tests only.
 - **One backend.** Only scalar and x86-64 SSE2 are implemented. There is no
   AVX2, NEON/ARM, LLVM IR, or WASM backend yet.
 

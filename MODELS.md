@@ -46,6 +46,7 @@ selftest         -> PASS
 - Weights: Q4_0/Q8_0/F32 norms
 - Tokenizer: GPT-2 byte-level BPE
 - Tied token embedding/output
+- Current file behaves as a base completion model; for Q&A use an Instruct variant
 - RoPE base: 100000
 - BOS = EOS = 0
 
@@ -92,6 +93,9 @@ genprompt "Once upon a time" 0 1 3
   , there was
 ```
 
+`genprompt` is the reliable path for this base file. `ask` is implemented for
+SmolLM2-Instruct ChatML and will repeat or ramble when given a base model.
+
 `selftest` recognizes the SmolLM2 profile:
 
 ```text
@@ -129,6 +133,36 @@ byte-level BPE with `Ġ` space markers. The kernel now detects
 This is a byte-level encoder, not a full GPT-2 regex pre-tokenizer. Simple
 English prompts work; unusual contractions or punctuation may tokenize
 differently from the original GPT-2 regex.
+
+## Asking questions
+
+`ask` builds the SmolLM2 Instruct ChatML prompt:
+
+```text
+<|im_start|>system
+You are a helpful AI assistant named SmolLM, trained by Hugging Face<|im_end|>
+<|im_start|>user
+{question}<|im_end|>
+<|im_start|>assistant
+```
+
+It uses the exact `<|im_start|>` and `<|im_end|>` vocabulary tokens, greedy
+sampling, and stops on `<|im_end|>`. It requires an **Instruct** GGUF:
+
+```text
+ask "What is 2+2?" 20
+```
+
+The current `smallm.gguf` is a base completion model. Asking it a question
+produces text like:
+
+```text
+2+2+2=42
+```
+
+That is a model-profile limitation, not a kernel bug. Download a SmolLM2-135M
+**Instruct** GGUF and use the same `ask` command for short answers. Keep the
+base file for completion/tokenizer/GQA tests.
 
 ## Recommended test mix
 

@@ -8,6 +8,8 @@
   tied token embedding/output, GQA 9/3, configurable RoPE base (100000), a
   256-position context cap, and a SmolLM `selftest` profile.
 - Added `MODELS.md` with TinyStories and SmolLM2 profiles and test recipes.
+- Added `ask` with SmolLM2 Instruct ChatML tokens and `<|im_end|>` stopping.
+  The current `smallm.gguf` is a base model; `ask` requires an Instruct GGUF.
 
 ## v0.3.0 — 2026-10-21
 
