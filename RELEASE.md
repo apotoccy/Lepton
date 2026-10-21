@@ -54,8 +54,8 @@ a CPU baseline, not a wall-clock S9 measurement.
 Still required on the Lenovo IdeaPad S9:
 
 1. Build the tagged ISO with `make iso MODEL=models/tinystories.gguf`.
-2. Boot it and run `config`, `fwdpos 0 1`, `bench 8`, and
-   `genprompt "Once upon a time" 0 1 20`.
+2. Boot it and confirm the prompt accepts typing. Then run `config`,
+   `fwdpos 0 1`, `bench 8`, and `genprompt "Once upon a time" 0 1 20`.
 3. Record the S9 `bench` result and whether `poweroff` completes.
 
 The host currently has no physical S9 access, so this remains a release
@@ -63,6 +63,8 @@ checklist item rather than a completed validation.
 
 ## Known limitations
 
+- S9 keyboard input is being hardened with controller initialization and a
+  polling fallback; a field retest is required.
 - `poweroff` prints `powering off...` on the S9 but does not switch it off;
   reboot and Ctrl+Alt+Del work.
 - Heap cap is 64 MB and the inference workspace budget is 60 MB; models above

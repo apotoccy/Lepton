@@ -10,6 +10,7 @@ extern fn interrupts_init() -> void;
 extern fn cpu_hlt() -> void;
 extern fn ticks() -> u32;
 extern fn kbd_read() -> u32;
+extern fn kbd_poll() -> void;
 extern fn mb_module_count() -> u32;
 extern fn mb_module_start(idx: u32) -> u32;
 extern fn mb_module_size(idx: u32) -> u32;
@@ -1090,7 +1091,9 @@ fn main() {
 
     print("lepton> ");
     while (true) {
+        kbd_poll();
         cpu_hlt();
+        kbd_poll();
         let kbdr = kbd_read();
         if (kbdr != 0) {
             let ch = kbdr as u8;

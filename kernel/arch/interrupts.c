@@ -243,6 +243,13 @@ static void kbd_handle(u8 sc) {
     kbd_emit(c);
 }
 
+void kbd_poll(void) {
+    u8 status = inb(0x64);
+    if ((status & 0x01) != 0 && (status & 0x20) == 0) {
+        kbd_handle(inb(0x60));
+    }
+}
+
 uint32_t kbd_read(void) {
     if (kbd_tail == kbd_head) return 0;
     char c = kbd_buf[kbd_tail];
@@ -290,10 +297,53 @@ void irq_handler(uint32_t *frame) {
     pic_eoi(irq);
 }
 
+
+/* ---- PS/2 keyboard controller ---- */
+static int kbd_wait_input(void) {
+    for (int i = 0; i < 100000; i++) {
+        if ((inb(0x64) & 0x02) == 0) return 1;
+    }
+    return 0;
+}
+
+static int kbd_wait_output(void) {
+    for (int i = 0; i < 100000; i++) {
+        if ((inb(0x64) & 0x01) != 0) return 1;
+    }
+    return 0;
+}
+
+static void keyboard_init(void) {
+    /* Disable both devices and flush a possibly stale output buffer. */
+    if (kbd_wait_input()) outb(0x64, 0xAD);
+    if (kbd_wait_input()) outb(0x64, 0xA7);
+    for (int i = 0; i < 32 && (inb(0x64) & 0x01) != 0; i++) {
+        (void)inb(0x60);
+    }
+
+    /* Read the controller configuration byte, enable IRQ 1, enable the
+       keyboard clock, and request scancode translation to set 1. */
+    if (kbd_wait_input()) outb(0x64, 0x20);
+    if (kbd_wait_output()) {
+        u8 cfg = inb(0x60);
+        cfg |= 0x01;      /* IRQ 1 */
+        cfg &= (u8)~0x10; /* keyboard clock enabled */
+        cfg |= 0x40;      /* translate to scancode set 1 */
+        if (kbd_wait_input()) outb(0x64, 0x60);
+        if (kbd_wait_input()) outb(0x60, cfg);
+    }
+
+    /* Enable the keyboard and ask it to start scanning. */
+    if (kbd_wait_input()) outb(0x64, 0xAE);
+    if (kbd_wait_input()) outb(0x60, 0xF4);
+    if (kbd_wait_output()) (void)inb(0x60);  /* ACK */
+}
+
 /* ---- Public API ---- */
 void interrupts_init(void) {
     gdt_init();
     idt_init();
+    keyboard_init();
     pic_remap();
     pit_init();
     /* Enable COM1 receive-data interrupt. serial_init already set the

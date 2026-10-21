@@ -45,9 +45,10 @@ Lepton OS is a monolithic 32-bit kernel using the **Multiboot 1** specification.
 
 - **VGA text console.** 80x25 text at `0xB8000`, with scrolling, cursor
   tracking, and color attributes.
-- **PS/2 keyboard.** Scancode Set 1 with Shift, Ctrl, and Alt tracking;
-  Ctrl+Alt+Del reboots. Keystrokes go into a 256-byte ring buffer. The REPL
-  line buffer is 128 bytes.
+- **PS/2 keyboard.** The controller is initialized to scancode set 1 with
+  IRQ1 enabled; the REPL also polls it as a fallback. Shift, Ctrl, and Alt are
+  tracked; Ctrl+Alt+Del reboots. Keystrokes go into a 256-byte ring buffer. The
+  REPL line buffer is 128 bytes.
 - **Serial (COM1).** 38400 baud, mirroring screen output and accepting input.
   Used for headless QEMU sessions.
 - **PIT.** IRQ 0 at 100 Hz.
