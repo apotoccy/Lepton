@@ -219,5 +219,8 @@ Observed:
 The Q4_K_S/Q4_K_M variants from that repository mix in Q5_0 tensors, which
 the kernel does not support yet. Use Q4_0 for now.
 
+`selftest` is a base-profile check; on the Instruct model it reports a skip.
+Use `ask` for Instruct validation.
+
 Use SmolLM2 as the **demo/model-compatibility target**, but keep TinyStories
 as the **fast deterministic regression fixture**.

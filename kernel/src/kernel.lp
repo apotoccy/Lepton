@@ -2860,7 +2860,9 @@ fn main() {
                             } else {
                                 println("  selftest FAIL (TinyStories BOS {tok_ok}, prompt {prompt_best})");
                             }
-                        } else if (tc2.n_embd == 576 as i64 && tc2.n_layer == 30 as i64) {
+                        } else if (tc2.n_embd == 576 as i64
+                                   && tc2.n_layer == 30 as i64
+                                   && model_bos(tm) == 0 as i64) {
                             clear_kv_cache(kv_k_buf, kv_v_buf,
                                            active_cfg.n_layer, active_cfg.max_seq,
                                            active_cfg.n_head_kv * active_cfg.head_dim);

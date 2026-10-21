@@ -76,6 +76,7 @@ checklist item rather than a completed validation.
   GQA, RoPE base 100000, prompt prefill, generation, and `selftest`
   (BOS 29, prompt 28). `ask` is validated with the Instruct Q4_0 variant
   (`2 + 2 = 4.`); Q4_K_S/Q4_K_M from that repository need Q5_0 support.
+  `selftest` remains base-profile-specific; use `ask` for Instruct.
 - One S9 report showed a black screen with the REPL build; the boot path is
   being triaged separately from the keyboard fix.
 - `poweroff` now uses the DSDT `_S5` sleep types and the FADT SMI/PM1 fields;
