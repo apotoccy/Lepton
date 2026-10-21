@@ -112,7 +112,8 @@ cursor editing, eight-entry history, tab completion, and Ctrl+C/Ctrl+L.
 - `genprompt "<text>" [temp] [top_k] [n]` — encode a prompt, prefill, and
   generate `n` continuation tokens. Temperature `0` is greedy.
 - `ask "<question>" [n]` — SmolLM2 Instruct ChatML question; requires an
-  Instruct GGUF and stops at `<|im_end|>`.
+  Instruct GGUF and stops at `<|im_end|>`. Prefill progress is printed;
+  Ctrl+C cancels prefill or generation.
 - `stop "<text>"` — set a stop sequence for generation; `stop` clears it.
 - `selftest` — deterministic TinyStories forward check.
 - `mem` — bump-heap usage and limit.

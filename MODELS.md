@@ -147,7 +147,10 @@ You are a helpful AI assistant named SmolLM, trained by Hugging Face<|im_end|>
 ```
 
 It uses the exact `<|im_start|>` and `<|im_end|>` vocabulary tokens, greedy
-sampling, and stops on `<|im_end|>`. It requires an **Instruct** GGUF:
+sampling, and stops on `<|im_end|>`. It requires an **Instruct** GGUF.
+The ChatML prompt is about 37 tokens; `ask` prints prefill progress and
+`Ctrl+C` cancels prefill or generation. On the S9, the first answer may take
+minutes because prefill is not streamed from the terminal.
 
 ```text
 ask "What is 2+2?" 20

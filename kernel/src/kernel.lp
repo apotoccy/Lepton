@@ -2699,10 +2699,10 @@ fn main() {
                                 let q_seg = alloc([u8; 256]) as ptr[u8];
                                 var qp: i64 = 0;
                                 q_ids[qp] = im_start as u32; qp = qp + 1;
-                                let sl = ask_text(q_seg, "system", true);
+                                let srole = ask_text(q_seg, "system", true);
                                 qp = append_encoded(q_m, tok_table, tok_count,
                                                     merge_table, merge_count,
-                                                    q_seg, 0 as i64, sl,
+                                                    q_seg, 0 as i64, srole,
                                                     q_ids, qp, 512);
                                 let sys = "You are a helpful AI assistant named SmolLM, trained by Hugging Face";
                                 var sy: i64 = 0;
@@ -2753,9 +2753,15 @@ fn main() {
                                     clear_kv_cache(kv_k_buf, kv_v_buf,
                                                    active_cfg.n_layer, active_cfg.max_seq,
                                                    active_cfg.n_head_kv * active_cfg.head_dim);
+                                    println("  prefilling {qp} tokens (Ctrl+C cancels)...");
+                                    print("  ");
                                     var q_ok: i32 = 1;
                                     var q_pos: i64 = 0;
                                     while (q_pos < qp) {
+                                        if (generation_cancelled()) {
+                                            q_ok = 0;
+                                            break;
+                                        }
                                         if (!forward_token_at_pos(q_m, q_cfg,
                                                                   q_ids[q_pos] as i64,
                                                                   q_pos,
@@ -2767,10 +2773,11 @@ fn main() {
                                             break;
                                         }
                                         q_pos = q_pos + 1;
+                                        if ((q_pos & 3) == 0) { print("."); }
                                     }
+                                    println("");
                                     if (q_ok == 1) {
                                         let q_eos = model_eos(q_m);
-                                        println("  asking ({qp} prompt tokens)...");
                                         print("  ");
                                         var q_g: i64 = 0;
                                         while (q_g < q_n && q_pos < q_cfg.max_seq) {
