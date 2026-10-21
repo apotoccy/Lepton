@@ -1,10 +1,18 @@
 # Changelog
 
-## Unreleased — v0.2.2
+## v0.2.2 — 2026-10-21
 
 - PS/2 keyboard controller initialization and polling fallback for the S9.
 - ACPI poweroff now reads `_S5` from the DSDT and uses the FADT SMI/PM1
   fields instead of treating PM1 lengths as sleep types.
+
+## Unreleased — v0.3.0
+
+- REPL line editing: Left/Right, Home/End, Delete, Ctrl+C, Ctrl+L.
+- Eight-entry command history with Up/Down.
+- Tab completion for command names.
+- Colored prompt, `clear`, and `help <command>` topics.
+- `bench` progress markers.
 
 ## v0.2.1 — 2026-10-21
 

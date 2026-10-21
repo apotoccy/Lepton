@@ -286,7 +286,7 @@ tensors, not the 15M model label.
 
 ### 4. OS UX: scrollback, history, and introspection
 
-- [ ] Simple ring buffer for command history (Up/Down arrows in the REPL)
+- [x] Command history ring buffer (Up/Down arrows in the REPL)
 - [x] `reset` command to clear the KV cache without rebooting
 - [x] Soft configuration/inference errors return to the prompt
 - [x] Fatal panic screen with Ctrl+Alt+Del reboot path
@@ -328,7 +328,7 @@ The original goal was 32-bit PCs *and* modern devices.
 - [x] Ctrl/Alt tracking, Ctrl+Alt+Del reboot, and `reboot` command
 - [x] ACPI `poweroff` command with emulator fallbacks
 - [x] Architecture-aware GGUF config keys and tensor-shape fallbacks
-- [ ] No keyboard LED control (caps lock)
+- [ ] No keyboard LED control (caps lock); no scrollback
 - [ ] Ring buffer drops input silently on overflow (128 chars max)
 
 **Tooling and testing**

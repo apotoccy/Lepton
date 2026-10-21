@@ -11,6 +11,10 @@ extern fn cpu_hlt() -> void;
 extern fn ticks() -> u32;
 extern fn kbd_read() -> u32;
 extern fn kbd_poll() -> void;
+extern fn lp_cursor_left() -> void;
+extern fn lp_cursor_right() -> void;
+extern fn lp_clear_screen() -> void;
+extern fn vga_set_color(c: u8) -> void;
 extern fn mb_module_count() -> u32;
 extern fn mb_module_start(idx: u32) -> u32;
 extern fn mb_module_size(idx: u32) -> u32;
@@ -879,6 +883,140 @@ fn parse_quoted(text: str, start: i64, out_buf: ptr[u8],
     return -1;
 }
 
+fn line_copy(dst: ptr[u8], src: ptr[u8], n: i64) -> void {
+    var i: i64 = 0;
+    while (i < n) {
+        dst[i] = src[i];
+        i = i + 1;
+    }
+}
+
+fn line_same(a: ptr[u8], a_len: i64, b: ptr[u8], b_len: i64) -> bool {
+    if (a_len != b_len) { return false; }
+    var i: i64 = 0;
+    while (i < a_len) {
+        if (a[i] != b[i]) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+fn line_redraw(buf: ptr[u8], len: i64, cursor: i64,
+               old_len: i64) -> void {
+    print("\r");
+    vga_set_color(0x0A as u8);
+    print("lepton> ");
+    vga_set_color(0x0F as u8);
+    var i: i64 = 0;
+    while (i < len) {
+        let c = buf[i] as char;
+        print("{c}");
+        i = i + 1;
+    }
+    var pad = old_len - len;
+    while (pad > 0) {
+        print(" ");
+        pad = pad - 1;
+    }
+    var back = len - cursor;
+    if (old_len > len) { back = back + (old_len - len); }
+    while (back > 0) {
+        lp_cursor_left();
+        back = back - 1;
+    }
+}
+
+fn history_add(hist: ptr[u8], hist_len: ptr[u8], hist_n: i64,
+               line: ptr[u8], len: i64) -> i64 {
+    if (len <= 0) { return hist_n; }
+    if (hist_n > 0) {
+        let last = hist_n - 1;
+        let last_off = last * 128;
+        let last_len = hist_len[last] as i64;
+        if (last_len == len) {
+            var same: bool = true;
+            var i: i64 = 0;
+            while (i < len) {
+                if (hist[last_off + i] != line[i]) {
+                    same = false;
+                    break;
+                }
+                i = i + 1;
+            }
+            if (same) { return hist_n; }
+        }
+    }
+
+    if (hist_n >= 8) {
+        var i: i64 = 0;
+        while (i < 7) {
+            line_copy(hist + i * 128, hist + (i + 1) * 128, 128);
+            hist_len[i] = hist_len[i + 1];
+            i = i + 1;
+        }
+        line_copy(hist + 7 * 128, line, len);
+        hist_len[7] = len as u8;
+        return 8;
+    }
+
+    line_copy(hist + hist_n * 128, line, len);
+    hist_len[hist_n] = len as u8;
+    return hist_n + 1;
+}
+
+fn history_load(hist: ptr[u8], hist_len: ptr[u8], idx: i64,
+                line: ptr[u8]) -> i64 {
+    let n = hist_len[idx] as i64;
+    line_copy(line, hist + idx * 128, n);
+    return n;
+}
+
+fn buf_prefix(s: str, buf: ptr[u8], n: i64) -> bool {
+    var i: i64 = 0;
+    while (i < n) {
+        if (s[i] == '\0') { return false; }
+        if (s[i] as u8 != buf[i]) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+fn complete_line(buf: ptr[u8], len: i64, cursor: i64) -> i64 {
+    if (cursor != len || len <= 0) { return len; }
+    var i: i64 = 0;
+    while (i < len) {
+        if (buf[i] == 32 as u8) { return len; }
+        i = i + 1;
+    }
+    let cmds: [str; 20] = {
+        "modules", "info", "config", "tensors", "embed", "forward",
+        "fwdpos", "bench", "gqapair", "generate", "encode", "genprompt",
+        "tensor", "matvec", "decodetok", "vocab", "reset", "reboot",
+        "poweroff", "help"
+    };
+    var found: i64 = -1;
+    var count: i64 = 0;
+    for c in 0..20 {
+        if (buf_prefix(cmds[c], buf, len)) {
+            count = count + 1;
+            found = c;
+        }
+    }
+    if (count == 1) {
+        var j = len;
+        var k: i64 = len;
+        while (cmds[found][k] != '\0') {
+            if (j < 127) {
+                buf[j] = cmds[found][k] as u8;
+                j = j + 1;
+            }
+            k = k + 1;
+        }
+        return j;
+    }
+    return len;
+}
+
 fn main() {
     serial_init();
     vga_init();
@@ -1083,25 +1221,148 @@ fn main() {
     println("[7] Enabling interrupts");
     interrupts_init();
     println("    timer at 100 Hz, keyboard ready");
-    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, filetest, help");
+    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
     println("");
 
     var line_buf = alloc([u8; 128]) as ptr[u8];
     var line_len: i64 = 0;
+    var cursor: i64 = 0;
+    let history_buf = alloc([u8; 1024]) as ptr[u8];
+    let history_len = alloc([u8; 8]) as ptr[u8];
+    var history_n: i64 = 0;
+    var history_pos: i64 = 0;
 
+    vga_set_color(0x0A as u8);
     print("lepton> ");
+    vga_set_color(0x0F as u8);
     while (true) {
         kbd_poll();
         cpu_hlt();
         kbd_poll();
-        let kbdr = kbd_read();
-        if (kbdr != 0) {
-            let ch = kbdr as u8;
+        let ev = kbd_read();
+        if (ev == 0) { continue; }
+
+        if (ev == 0x100) {          /* Up */
+            if (history_n > 0 && history_pos > 0) {
+                let old_len = line_len;
+                history_pos = history_pos - 1;
+                line_len = history_load(history_buf, history_len,
+                                        history_pos, line_buf);
+                cursor = line_len;
+                line_redraw(line_buf, line_len, cursor, old_len);
+            }
+            continue;
+        }
+        if (ev == 0x101) {          /* Down */
+            if (history_pos < history_n) {
+                let old_len = line_len;
+                history_pos = history_pos + 1;
+                if (history_pos == history_n) {
+                    line_len = 0;
+                    cursor = 0;
+                } else {
+                    line_len = history_load(history_buf, history_len,
+                                            history_pos, line_buf);
+                    cursor = line_len;
+                }
+                line_redraw(line_buf, line_len, cursor, old_len);
+            }
+            continue;
+        }
+        if (ev == 0x102) {          /* Left */
+            if (cursor > 0) {
+                cursor = cursor - 1;
+                lp_cursor_left();
+            }
+            continue;
+        }
+        if (ev == 0x103) {          /* Right */
+            if (cursor < line_len) {
+                cursor = cursor + 1;
+                lp_cursor_right();
+            }
+            continue;
+        }
+        if (ev == 0x104) {          /* Home */
+            while (cursor > 0) {
+                cursor = cursor - 1;
+                lp_cursor_left();
+            }
+            continue;
+        }
+        if (ev == 0x105) {          /* End */
+            while (cursor < line_len) {
+                cursor = cursor + 1;
+                lp_cursor_right();
+            }
+            continue;
+        }
+        if (ev == 0x106) {          /* Delete */
+            if (cursor < line_len) {
+                let old_len = line_len;
+                var i = cursor;
+                while (i < line_len - 1) {
+                    line_buf[i] = line_buf[i + 1];
+                    i = i + 1;
+                }
+                line_len = line_len - 1;
+                line_redraw(line_buf, line_len, cursor, old_len);
+                history_pos = history_n;
+            }
+            continue;
+        }
+        if (ev == 0x107) {          /* Tab */
+            let old_len = line_len;
+            let nl = complete_line(line_buf, line_len, cursor);
+            if (nl > line_len) {
+                line_len = nl;
+                cursor = nl;
+                line_redraw(line_buf, line_len, cursor, old_len);
+            }
+            continue;
+        }
+        if (ev == 0x108) {          /* Ctrl+C */
+            print("^C");
+            println("");
+            line_len = 0;
+            cursor = 0;
+            history_pos = history_n;
+            vga_set_color(0x0A as u8);
+            print("lepton> ");
+            vga_set_color(0x0F as u8);
+            continue;
+        }
+        if (ev == 0x109) {          /* Ctrl+L */
+            lp_clear_screen();
+            line_redraw(line_buf, line_len, cursor, line_len);
+            continue;
+        }
+
+        if (ev < 0x100) {
+            let ch = ev as u8;
             if (ch == 8 as u8 || ch == 127 as u8) {
-                if (line_len > 0) {
+                if (cursor == line_len && line_len > 0) {
+                    print("\b \b");
                     line_len = line_len - 1;
+                    cursor = cursor - 1;
+                    history_pos = history_n;
+                } else if (cursor > 0) {
+                    let old_len = line_len;
+                    var i = cursor - 1;
+                    while (i < line_len - 1) {
+                        line_buf[i] = line_buf[i + 1];
+                        i = i + 1;
+                    }
+                    line_len = line_len - 1;
+                    cursor = cursor - 1;
+                    line_redraw(line_buf, line_len, cursor, old_len);
+                    history_pos = history_n;
                 }
             } else if (ch == 10 as u8 || ch == 13 as u8) {
+                println("");
+                history_n = history_add(history_buf, history_len,
+                                        history_n, line_buf, line_len);
+                history_pos = history_n;
                 let cmd_mark = alloc_mark();
                 let text = read_str(line_buf, 0, line_len);
                 if (starts_with(text, "modules")) {
@@ -1397,8 +1658,10 @@ fn main() {
                                 break;
                             }
                             bn_i = bn_i + 1;
+                            if ((bn_i & 3) == 0) { print("."); }
                         }
                         let bn_t1 = ticks();
+                        println("");
                         if (bn_ok == 1) {
                             let bn_ms = (bn_t1 - bn_t0) as i64 * 10;
                             let bn_per = bn_ms as f64 / bn_n as f64;
@@ -1699,18 +1962,76 @@ fn main() {
                     let rd = read_file_at("test.bin", 0, fbuf, 4);
                     let wr = write_file("test.bin", fbuf, 4);
                     println("  file_size={fs} read={rd} write={wr}");
+                } else if (starts_with(text, "clear")) {
+                    lp_clear_screen();
+                } else if (starts_with(text, "help ")) {
+                    let topic = read_str(line_buf, 5, line_len - 5);
+                    if (starts_with(topic, "generate")) {
+                        println("    generate [temp] [top_k] [n] - sample from BOS");
+                    } else if (starts_with(topic, "genprompt")) {
+                        println("    genprompt \"text\" [temp] [top_k] [n] - prefill and continue");
+                    } else if (starts_with(topic, "bench")) {
+                        println("    bench [n] - sequential forward timing");
+                    } else if (starts_with(topic, "encode")) {
+                        println("    encode <text> - tokenize text");
+                    } else if (starts_with(topic, "config")) {
+                        println("    config - show the loaded GGUF model configuration");
+                    } else {
+                        println("    no help for that topic");
+                    }
                 } else if (starts_with(text, "help")) {
-                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, filetest, help");
+                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
                 } else if (line_len > 0) {
                     println("  {text}");
                 }
                 alloc_release(cmd_mark);
                 line_len = 0;
+                cursor = 0;
+                history_pos = history_n;
                 print("lepton> ");
-            }
-            else if (line_len < 127) {
-                line_buf[line_len] = ch;
-                line_len = line_len + 1;
+            } else if (ch == 3 as u8) {       /* serial Ctrl+C */
+                print("^C");
+                println("");
+                line_len = 0;
+                cursor = 0;
+                history_pos = history_n;
+                vga_set_color(0x0A as u8);
+                print("lepton> ");
+                vga_set_color(0x0F as u8);
+            } else if (ch == 12 as u8) {      /* serial Ctrl+L */
+                lp_clear_screen();
+                line_redraw(line_buf, line_len, cursor, line_len);
+            } else if (ch == 9 as u8) {       /* serial Tab */
+                let old_len = line_len;
+                let nl = complete_line(line_buf, line_len, cursor);
+                if (nl > line_len) {
+                    line_len = nl;
+                    cursor = nl;
+                    line_redraw(line_buf, line_len, cursor, old_len);
+                }
+            } else if (ch >= 32 as u8 && ch < 127 as u8) {
+                if (line_len < 127) {
+                    if (cursor == line_len) {
+                        line_buf[line_len] = ch;
+                        line_len = line_len + 1;
+                        cursor = cursor + 1;
+                        let c = ch as char;
+                        print("{c}");
+                        history_pos = history_n;
+                    } else {
+                    let old_len = line_len;
+                    var i = line_len;
+                    while (i > cursor) {
+                        line_buf[i] = line_buf[i - 1];
+                        i = i - 1;
+                    }
+                        line_buf[cursor] = ch;
+                        line_len = line_len + 1;
+                        cursor = cursor + 1;
+                        line_redraw(line_buf, line_len, cursor, old_len);
+                        history_pos = history_n;
+                    }
+                }
             }
         }
     }

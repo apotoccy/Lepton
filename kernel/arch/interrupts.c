@@ -204,32 +204,49 @@ static const char kbd_shift[128] = {
 };
 
 #define KBD_BUF_SIZE 256
-static char kbd_buf[KBD_BUF_SIZE];
+#define KBD_UP      0x100u
+#define KBD_DOWN    0x101u
+#define KBD_LEFT    0x102u
+#define KBD_RIGHT   0x103u
+#define KBD_HOME    0x104u
+#define KBD_END     0x105u
+#define KBD_DELETE  0x106u
+#define KBD_TAB     0x107u
+#define KBD_CTRL_C  0x108u
+#define KBD_CTRL_L  0x109u
+
+static u32 kbd_buf[KBD_BUF_SIZE];
 static volatile u16 kbd_head = 0;
 static volatile u16 kbd_tail = 0;
 
-static void kbd_emit(char c) {
-    if (c == '\b' || c == 0x7F) {
-        serial_puts("\b \b");
-        vga_putc('\b');      /* VGA driver already handles the erase */
-        c = '\b';
-    } else if (c == '\r' || c == '\n') {
-        serial_puts("\r\n");
-        vga_putc('\n');
-        c = '\n';
-    } else {
-        serial_putc(c);
-        vga_putc(c);
-    }
-    
+static void kbd_push(u32 ev) {
     u16 next = (kbd_head + 1) % KBD_BUF_SIZE;
     if (next != kbd_tail) {
-        kbd_buf[kbd_head] = c;
+        kbd_buf[kbd_head] = ev;
         kbd_head = next;
     }
 }
 
+/* The REPL owns echoing and line editing; the driver only queues events. */
+static void kbd_emit(char c) {
+    kbd_push((u32)(uint8_t)c);
+}
+
+static u8 kbd_extended = 0;
+
 static void kbd_handle(u8 sc) {
+    if (sc == 0xE0) { kbd_extended = 1; return; }
+    if (kbd_extended) {
+        kbd_extended = 0;
+        if (sc == 0x48) { kbd_push(KBD_UP); }
+        else if (sc == 0x50) { kbd_push(KBD_DOWN); }
+        else if (sc == 0x4B) { kbd_push(KBD_LEFT); }
+        else if (sc == 0x4D) { kbd_push(KBD_RIGHT); }
+        else if (sc == 0x47) { kbd_push(KBD_HOME); }
+        else if (sc == 0x4F) { kbd_push(KBD_END); }
+        else if (sc == 0x53) { kbd_push(KBD_DELETE); }
+        return;
+    }
     if (sc == 0x2A || sc == 0x36) { shift_down = 1; return; }
     if (sc == 0xAA || sc == 0xB6) { shift_down = 0; return; }
     if (sc == 0x1D) { ctrl_down = 1; return; }
@@ -237,6 +254,9 @@ static void kbd_handle(u8 sc) {
     if (sc == 0x38) { alt_down = 1; return; }
     if (sc == 0xB8) { alt_down = 0; return; }
     if (sc == 0x53 && ctrl_down && alt_down) { lp_reboot(); }
+    if (ctrl_down && sc == 0x2E) { kbd_push(KBD_CTRL_C); return; }
+    if (ctrl_down && sc == 0x26) { kbd_push(KBD_CTRL_L); return; }
+    if (sc == 0x0F) { kbd_push(KBD_TAB); return; }
     if (sc & 0x80) return;
     char c = shift_down ? kbd_shift[sc] : kbd_normal[sc];
     if (c == 0) return;
@@ -252,9 +272,9 @@ void kbd_poll(void) {
 
 uint32_t kbd_read(void) {
     if (kbd_tail == kbd_head) return 0;
-    char c = kbd_buf[kbd_tail];
+    u32 ev = kbd_buf[kbd_tail];
     kbd_tail = (kbd_tail + 1) % KBD_BUF_SIZE;
-    return (uint32_t)(uint8_t)c;
+    return ev;
 }
 
 void irq_handler(uint32_t *frame) {

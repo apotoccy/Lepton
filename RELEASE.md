@@ -1,9 +1,11 @@
-# Lepton v0.2.1 Release Validation
+# Lepton v0.3.0 Release Validation
 
 Date: 2026-10-21
 
 ## Release contents
 
+- REPL 2.0: cursor editing, eight-entry history, tab completion, colored
+  prompt, `clear`, and `help <command>` topics.
 - Grouped-query attention with a synthetic two-position reference.
 - Multiboot memory-map heap sizing, allocation checks, and low-memory failure.
 - Tokenizer bounds, `<0xNN>` byte fallback, and a working merge-based BPE path.
@@ -25,6 +27,7 @@ Date: 2026-10-21
 | QEMU 128 MB | Boots; `fwdpos 0 1` returns 9038 (`Once`) |
 | QEMU 32 MB | Boots with a 10.8 MB heap; same prediction |
 | QEMU 24 MB | Clean low-memory fatal message |
+| REPL editor | History, Tab, Left/Delete verified in QEMU |
 | `pyflakes` / `git diff --check` | Clean |
 
 ## Performance baseline
@@ -66,6 +69,7 @@ checklist item rather than a completed validation.
 
 - S9 keyboard input uses controller initialization plus a polling fallback;
   field testing passed after the v0.2.1 keyboard fix.
+- REPL 2.0 is QEMU-tested; an S9 line-editing/history retest is pending.
 - `poweroff` now uses the DSDT `_S5` sleep types and the FADT SMI/PM1 fields;
   S9 retest is required.
 - Heap cap is 64 MB and the inference workspace budget is 60 MB; models above
@@ -77,7 +81,7 @@ checklist item rather than a completed validation.
 - The tokenizer merge path is synthetic-tested; TinyStories has no merges.
 - Generation defaults to 30 tokens and has no streaming or stop-sequence
   controls beyond EOS.
-- No command history or scrollback.
+- No scrollback; command history is limited to eight entries.
 - 299 ms/token is the QEMU baseline; S9 performance is expected to be slower.
 
 ## Next-phase priorities

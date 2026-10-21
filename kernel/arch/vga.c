@@ -72,6 +72,33 @@ void vga_putc(char c) {
     vga_update_cursor();
 }
 
+void vga_set_color(unsigned char c) {
+    color = c;
+}
+
+void vga_cursor_left(void) {
+    if (cursor_x > 0) {
+        cursor_x--;
+    } else if (cursor_y > 0) {
+        cursor_y--;
+        cursor_x = VGA_WIDTH - 1;
+    }
+    vga_update_cursor();
+}
+
+void vga_cursor_right(void) {
+    cursor_x++;
+    if (cursor_x >= VGA_WIDTH) {
+        cursor_x = 0;
+        cursor_y++;
+    }
+    if (cursor_y >= VGA_HEIGHT) {
+        vga_scroll();
+        cursor_y = VGA_HEIGHT - 1;
+    }
+    vga_update_cursor();
+}
+
 void vga_init(void) {
     vga_clear();
 }

@@ -3,6 +3,8 @@
 
 extern void vga_putc(char c);
 extern void vga_clear(void);
+extern void vga_cursor_left(void);
+extern void vga_cursor_right(void);
 
 typedef unsigned int   uint32_t;
 typedef unsigned short uint16_t;
@@ -127,6 +129,31 @@ void lp_println(const char *s) {
     serial_putc('\r');
     serial_putc('\n');
     vga_putc('\n');
+}
+
+void lp_cursor_left(void) {
+    serial_putc(27);
+    serial_putc('[');
+    serial_putc('D');
+    vga_cursor_left();
+}
+
+void lp_cursor_right(void) {
+    serial_putc(27);
+    serial_putc('[');
+    serial_putc('C');
+    vga_cursor_right();
+}
+
+void lp_clear_screen(void) {
+    serial_putc(27);
+    serial_putc('[');
+    serial_putc('2');
+    serial_putc('J');
+    serial_putc(27);
+    serial_putc('[');
+    serial_putc('H');
+    vga_clear();
 }
 
 __attribute__((noreturn)) void lp_panic(const char *s) {

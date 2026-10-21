@@ -100,8 +100,9 @@ as a GRUB ISO.
   links only libgcc for 64-bit integer helpers.
 - **Interactive OS:** VGA text console, PS/2 and serial keyboard, 100 Hz PIT,
   interrupts, PS/2 controller initialization (scancode set 1), IRQ1 plus a
-  polling fallback, and a live REPL with `reset`, `reboot`, `poweroff`,
-  Ctrl+Alt+Del, and ACPI shutdown. Expected
+  polling fallback, and a line-edited REPL with colored prompts, eight-entry
+  history, cursor editing, tab completion, help topics, `clear`, `reset`,
+  `reboot`, `poweroff`, Ctrl+Alt+Del, and ACPI shutdown. Expected
   inference/configuration errors return to the prompt; fatal panics print a
   reboot hint.
 - **Verified target:** TinyStories-15M on a 2008 Lenovo IdeaPad S9 (Intel Atom),

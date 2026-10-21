@@ -221,7 +221,8 @@ include:
 - generation: `generate [T] [K] [N]`, `genprompt "text" [T] [K] [N]`,
   `fwdpos`, `forward`; generation stops at EOS or context limit;
 - maintenance: `reset` (KV cache), `reboot` (or Ctrl+Alt+Del), `poweroff`,
-  `filetest`.
+  `clear`, `filetest`; the prompt supports history, cursor editing, and tab
+  completion.
 
 Expected configuration/inference errors are soft errors that return to the
 prompt. Configuration parsing is architecture-aware and falls back to tensor
