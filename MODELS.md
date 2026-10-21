@@ -176,5 +176,48 @@ base file for completion/tokenizer/GQA tests.
 | Tied embeddings | SmolLM2-135M |
 | S9 load/latency test | SmolLM2-135M |
 
+## SmolLM2-135M-Instruct — Q&A profile
+
+Use this instead of the base file when you want short answers:
+
+- File: `models/smollm2-instruct-q4_0.gguf`
+- Size: 91,726,912 bytes
+- SHA-256: `f68203bfb98b1b1e8c64fac75fab10c4e36acac081609573b4df0fcc19c90dd9`
+- Architecture: Llama, 30 layers, 576 hidden, GQA 9/3
+- Weights: Q4_0/Q8_0/F32 norms (all supported)
+- Tokenizer: GPT-2 byte-level BPE
+- ChatML with `<|im_start|>` / `<|im_end|>`
+- BOS=1, EOS=2
+- RoPE base 100000
+- Context capped to 256
+
+Download:
+
+```bash
+curl -L --fail -o models/smollm2-instruct-q4_0.gguf \
+  https://huggingface.co/QuantFactory/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct.Q4_0.gguf
+```
+
+Test:
+
+```bash
+make clean-kernel
+make iso MODEL=models/smollm2-instruct-q4_0.gguf
+```
+
+```text
+ask "What is 2+2?" 8
+```
+
+Observed:
+
+```text
+  asking (37 prompt tokens)...
+  2 + 2 = 4.
+```
+
+The Q4_K_S/Q4_K_M variants from that repository mix in Q5_0 tensors, which
+the kernel does not support yet. Use Q4_0 for now.
+
 Use SmolLM2 as the **demo/model-compatibility target**, but keep TinyStories
 as the **fast deterministic regression fixture**.

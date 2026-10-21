@@ -2693,7 +2693,7 @@ fn main() {
                                 println("  this model has no ChatML tokens");
                             } else {
                                 let q_n_arg = parse_int_at(text, q_end);
-                                var q_n: i64 = 32;
+                                var q_n: i64 = 8;
                                 if (q_n_arg > 0) { q_n = q_n_arg; }
                                 let q_ids = alloc([u32; 512]) as ptr[u32];
                                 let q_seg = alloc([u8; 256]) as ptr[u8];

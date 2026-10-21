@@ -89,6 +89,23 @@ Check GitHub's Git LFS storage and bandwidth quotas before doing this.
 - RoPE base: 100000
 - BOS = EOS = 0
 
+## SmolLM2-135M-Instruct Q4_0 profile
+
+- Path: `models/smollm2-instruct-q4_0.gguf`
+- Size: 91,726,912 bytes
+- SHA-256: `f68203bfb98b1b1e8c64fac75fab10c4e36acac081609573b4df0fcc19c90dd9`
+- Source: `QuantFactory/SmolLM2-135M-Instruct-GGUF`
+- File: `SmolLM2-135M-Instruct.Q4_0.gguf`
+- Tokenizer: GPT-2 BPE, ChatML
+- BOS=1, EOS=2, RoPE base 100000
+
+Use it for `ask`; the base `smallm.gguf` does not follow instructions.
+
+```bash
+make run-kernel MODEL=models/smollm2-instruct-q4_0.gguf
+ask "What is 2+2?" 8
+```
+
 ## Use the realistic profile
 
 ```bash

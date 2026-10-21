@@ -9,7 +9,9 @@
   256-position context cap, and a SmolLM `selftest` profile.
 - Added `MODELS.md` with TinyStories and SmolLM2 profiles and test recipes.
 - Added `ask` with SmolLM2 Instruct ChatML tokens and `<|im_end|>` stopping.
-  The current `smallm.gguf` is a base model; `ask` requires an Instruct GGUF.
+  Validated with `SmolLM2-135M-Instruct.Q4_0.gguf`
+  (`ask "What is 2+2?" 8` → `2 + 2 = 4.`). The Q4_K_S/Q4_K_M variants use
+  Q5_0 tensors and are not supported yet.
 
 ## v0.3.0 — 2026-10-21
 

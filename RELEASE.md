@@ -74,8 +74,8 @@ checklist item rather than a completed validation.
 - REPL 2.0 is QEMU-tested; an S9 line-editing/history retest is pending.
 - SmolLM2-135M is validated in QEMU: config, GPT-2 tokenization, tied output,
   GQA, RoPE base 100000, prompt prefill, generation, and `selftest`
-  (BOS 29, prompt 28). The current file is a base model; `ask` needs the
-  Instruct variant.
+  (BOS 29, prompt 28). `ask` is validated with the Instruct Q4_0 variant
+  (`2 + 2 = 4.`); Q4_K_S/Q4_K_M from that repository need Q5_0 support.
 - One S9 report showed a black screen with the REPL build; the boot path is
   being triaged separately from the keyboard fix.
 - `poweroff` now uses the DSDT `_S5` sleep types and the FADT SMI/PM1 fields;

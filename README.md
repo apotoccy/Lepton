@@ -443,8 +443,10 @@ These are the boundaries of the current implementation, not a wish list; see
   normalizing the sentencepiece/GPT-2 space markers. `selftest` has profiles
   for TinyStories and SmolLM2; other models are skipped.
 - **Q&A.** `ask` uses SmolLM2 Instruct ChatML (`<|im_start|>` /
-  `<|im_end|>`) and requires an Instruct GGUF. The base `smallm.gguf` is for
-  completion tests only.
+  `<|im_end|>`) and requires an Instruct GGUF. The tested file is
+  `models/smollm2-instruct-q4_0.gguf` (Q4_0); the Q4_K_S/Q4_K_M variants
+  contain Q5_0 tensors and are not supported yet. The base `smallm.gguf`
+  remains for completion tests only.
 - **One backend.** Only scalar and x86-64 SSE2 are implemented. There is no
   AVX2, NEON/ARM, LLVM IR, or WASM backend yet.
 
