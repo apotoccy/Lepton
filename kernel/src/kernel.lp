@@ -312,16 +312,188 @@ fn matvec_q8_0(model: ptr[u8], data_start: i64,
     }
 }
 
+
+fn q4k_scale(scales: ptr[u8], j: i64) -> i32 {
+    let q = scales[j] as i32;
+    if (j < 4) { return q & 63; }
+    let q4 = scales[j + 4] as i32;
+    let qm = scales[j - 4] as i32;
+    return (q4 & 0x0F) | ((qm >> 6) << 4);
+}
+
+fn q4k_min(scales: ptr[u8], j: i64) -> i32 {
+    if (j < 4) { return (scales[j + 4] as i32) & 63; }
+    let q4 = scales[j + 4] as i32;
+    let qm = scales[j - 4] as i32;
+    return (q4 >> 4) | (((qm >> 4) & 0x03) << 4);
+}
+
+fn dequant_q4_k_block(src: ptr[u8], dst: ptr[f32]) -> void {
+    let d = read_f16(src, 0);
+    let dmin = read_f16(src, 2);
+    let scales = src + 4;
+    let qs = src + 16;
+    for j4 in 0..4 {
+        let is = j4 * 2;
+        let sc0 = q4k_scale(scales, is);
+        let m0 = q4k_min(scales, is);
+        let sc1 = q4k_scale(scales, is + 1);
+        let m1 = q4k_min(scales, is + 1);
+        let d0 = d * (sc0 as f32);
+        let mn0 = dmin * (m0 as f32);
+        let d1 = d * (sc1 as f32);
+        let mn1 = dmin * (m1 as f32);
+        let qbase = qs + j4 * 32;
+        let obase = j4 * 64;
+        for l in 0..32 {
+            let byte = qbase[l];
+            let lo = (byte & 0x0F as u8) as i32;
+            let hi = ((byte >> 4 as u8) & 0x0F as u8) as i32;
+            dst[obase + l] = d0 * (lo as f32) - mn0;
+            dst[obase + l + 32] = d1 * (hi as f32) - mn1;
+        }
+    }
+}
+
+fn dequant_row_tensor(model: ptr[u8], data_start: i64,
+                      t: GGUFTensorInfo, row: i64,
+                      out: ptr[f32]) -> bool {
+    let dim = t.dim0 as i64;
+    let base = (model + data_start + (t.data_offset as i64)) as ptr[u8];
+    if (t.ggml_type == 2 as u32) {
+        let blocks = dim / 32;
+        dequant_q4_0_tensor(base + row * blocks * 18, out, blocks);
+        return true;
+    }
+    if (t.ggml_type == 8 as u32) {
+        let blocks = dim / 32;
+        dequant_q8_0_tensor(base + row * blocks * 34, out, blocks);
+        return true;
+    }
+    if (t.ggml_type == 12 as u32) {
+        if (dim % 256 != 0) {
+            println("  inference error: Q4_K row width is not a multiple of 256");
+            return false;
+        }
+        let blocks = dim / 256;
+        for b in 0..blocks {
+            dequant_q4_k_block(base + row * blocks * 144 + b * 144,
+                               out + b * 256);
+        }
+        return true;
+    }
+    if (t.ggml_type == 0 as u32) {
+        let src = (base + row * dim * 4) as ptr[f32];
+        for i in 0..dim { out[i] = src[i]; }
+        return true;
+    }
+    if (t.ggml_type == 1 as u32) {
+        for i in 0..dim { out[i] = read_f16(base + row * dim * 2 + i * 2, 0); }
+        return true;
+    }
+    println("  inference error: unsupported embedding/output type {t.ggml_type}");
+    return false;
+}
+
+fn matvec_q4_k(model: ptr[u8], data_start: i64,
+               t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
+               rows: i64, cols: i64) -> void {
+    let blocks = cols / 256;
+    let row_bytes = blocks * 144;
+    let base = (model + data_start + (t.data_offset as i64)) as ptr[u8];
+    for r in 0..rows {
+        var acc: f32 = 0.0f;
+        let row = base + r * row_bytes;
+        for b in 0..blocks {
+            let block = row + b * 144;
+            let d = read_f16(block, 0);
+            let dmin = read_f16(block, 2);
+            let scales = block + 4;
+            let qs = block + 16;
+            for j4 in 0..4 {
+                let is = j4 * 2;
+                let sc0 = q4k_scale(scales, is);
+                let m0 = q4k_min(scales, is);
+                let sc1 = q4k_scale(scales, is + 1);
+                let m1 = q4k_min(scales, is + 1);
+                let d0 = d * (sc0 as f32);
+                let mn0 = dmin * (m0 as f32);
+                let d1 = d * (sc1 as f32);
+                let mn1 = dmin * (m1 as f32);
+                let qbase = qs + j4 * 32;
+                let xbase = b * 256 + j4 * 64;
+                for l in 0..32 {
+                    let byte = qbase[l];
+                    let lo = (byte & 0x0F as u8) as i32;
+                    let hi = ((byte >> 4 as u8) & 0x0F as u8) as i32;
+                    acc = acc + x[xbase + l] * (d0 * (lo as f32) - mn0);
+                    acc = acc + x[xbase + l + 32] * (d1 * (hi as f32) - mn1);
+                }
+            }
+        }
+        y[r] = acc;
+    }
+}
+
+fn matvec_f32(model: ptr[u8], data_start: i64,
+              t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
+              rows: i64, cols: i64) -> void {
+    let base = (model + data_start + (t.data_offset as i64)) as ptr[f32];
+    for r in 0..rows {
+        var acc: f32 = 0.0f;
+        let row = r * cols;
+        for j in 0..cols {
+            acc = acc + base[row + j] * x[j];
+        }
+        y[r] = acc;
+    }
+}
+
+fn matvec_f16(model: ptr[u8], data_start: i64,
+              t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
+              rows: i64, cols: i64) -> void {
+    let base = (model + data_start + (t.data_offset as i64)) as ptr[u8];
+    for r in 0..rows {
+        var acc: f32 = 0.0f;
+        let row = r * cols * 2;
+        for j in 0..cols {
+            acc = acc + read_f16(base + row + j * 2, 0) * x[j];
+        }
+        y[r] = acc;
+    }
+}
+
 fn matvec_tensor(model: ptr[u8], data_start: i64,
                  t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
-                 rows: i64, cols: i64) -> void {
+                 rows: i64, cols: i64) -> bool {
+    if (t.dim0 as i64 != cols || t.dim1 as i64 != rows) {
+        println("  inference error: tensor shape mismatch for matvec");
+        return false;
+    }
+    if ((t.ggml_type == 2 as u32 || t.ggml_type == 8 as u32)
+            && cols % 32 != 0) {
+        println("  inference error: quantized row width is not a multiple of 32");
+        return false;
+    }
+    if (t.ggml_type == 12 as u32 && cols % 256 != 0) {
+        println("  inference error: Q4_K row width is not a multiple of 256");
+        return false;
+    }
     if (t.ggml_type == 2 as u32) {
         matvec_q4_0(model, data_start, t, x, y, rows, cols);
     } else if (t.ggml_type == 8 as u32) {
         matvec_q8_0(model, data_start, t, x, y, rows, cols);
+    } else if (t.ggml_type == 12 as u32) {
+        matvec_q4_k(model, data_start, t, x, y, rows, cols);
+    } else if (t.ggml_type == 0 as u32) {
+        matvec_f32(model, data_start, t, x, y, rows, cols);
+    } else if (t.ggml_type == 1 as u32) {
+        matvec_f16(model, data_start, t, x, y, rows, cols);
     } else {
-        panic("unsupported weight type in matvec");
+        println("  inference error: unsupported weight type {t.ggml_type}");
+        return false;
     }
+    return true;
 }
 
 fn rmsnorm_n(x: ptr[f32], w: ptr[f32], out: ptr[f32], n: i64,
@@ -447,7 +619,14 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
 
     /* 1. Embedding */
     let emb_t = tensor_by_name(model, tstart, tc, "token_embd.weight");
-    dequant_row_q4_0(model, data_start, emb_t, token, hidden);
+    if (emb_t.dim0 as i64 != n_embd || token < 0
+            || token >= (emb_t.dim1 as i64)) {
+        println("  inference error: token embedding shape mismatch");
+        return false;
+    }
+    if (!dequant_row_tensor(model, data_start, emb_t, token, hidden)) {
+        return false;
+    }
 
     /* 2. Layers */
     for layer in 0..n_layer {
@@ -458,16 +637,16 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
 
         /* Q, K, V */
         let aq_t = tensor_by_name(model, tstart, tc, "blk.{layer}.attn_q.weight");
-        matvec_tensor(model, data_start, aq_t, normed, q_buf,
-                      n_embd, n_embd);
+        if (!matvec_tensor(model, data_start, aq_t, normed, q_buf,
+                           n_embd, n_embd)) { return false; }
 
         let ak_t = tensor_by_name(model, tstart, tc, "blk.{layer}.attn_k.weight");
-        matvec_tensor(model, data_start, ak_t, normed, k_buf,
-                      kv_dim, n_embd);
+        if (!matvec_tensor(model, data_start, ak_t, normed, k_buf,
+                           kv_dim, n_embd)) { return false; }
 
         let av_t = tensor_by_name(model, tstart, tc, "blk.{layer}.attn_v.weight");
-        matvec_tensor(model, data_start, av_t, normed, v_buf,
-                      kv_dim, n_embd);
+        if (!matvec_tensor(model, data_start, av_t, normed, v_buf,
+                           kv_dim, n_embd)) { return false; }
 
         /* RoPE (identity at pos=0) */
         rope_apply(q_buf, pos, freqs, n_head, head_dim);
@@ -509,8 +688,8 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
 
         /* attn_out = Wo @ attended */
         let ao_t = tensor_by_name(model, tstart, tc, "blk.{layer}.attn_output.weight");
-        matvec_tensor(model, data_start, ao_t, attended, attn_out,
-                      n_embd, n_embd);
+        if (!matvec_tensor(model, data_start, ao_t, attended, attn_out,
+                           n_embd, n_embd)) { return false; }
 
         for i in 0..n_embd {
             hidden[i] = hidden[i] + attn_out[i];
@@ -523,20 +702,20 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
 
         /* FFN */
         let fg_t = tensor_by_name(model, tstart, tc, "blk.{layer}.ffn_gate.weight");
-        matvec_tensor(model, data_start, fg_t, normed, gate,
-                      n_ff, n_embd);
+        if (!matvec_tensor(model, data_start, fg_t, normed, gate,
+                           n_ff, n_embd)) { return false; }
 
         let fu_t = tensor_by_name(model, tstart, tc, "blk.{layer}.ffn_up.weight");
-        matvec_tensor(model, data_start, fu_t, normed, up,
-                      n_ff, n_embd);
+        if (!matvec_tensor(model, data_start, fu_t, normed, up,
+                           n_ff, n_embd)) { return false; }
 
         for i in 0..n_ff {
             silu_gate[i] = silu_f32(gate[i]) * up[i];
         }
 
         let fd_t = tensor_by_name(model, tstart, tc, "blk.{layer}.ffn_down.weight");
-        matvec_tensor(model, data_start, fd_t, silu_gate, down,
-                      n_embd, n_ff);
+        if (!matvec_tensor(model, data_start, fd_t, silu_gate, down,
+                           n_embd, n_ff)) { return false; }
 
         for i in 0..n_embd {
             hidden[i] = hidden[i] + down[i];
@@ -551,18 +730,17 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
     /* Output projection: fill logits[vocab] with raw scores */
     let ow_t = tensor_by_name(model, tstart, tc, "output.weight");
     let v_size = ow_t.dim1 as i64;
+    if (ow_t.dim0 as i64 != n_embd) {
+        println("  inference error: output projection width mismatch");
+        return false;
+    }
     if (v_size > cfg.vocab_size) {
         println("  inference error: output vocabulary {v_size} exceeds configured {cfg.vocab_size}");
         return false;
     }
     for vv in 0..v_size {
-        if (ow_t.ggml_type == 2 as u32) {
-            dequant_row_q4_0(model, data_start, ow_t, vv, logit_r);
-        } else {
-            let blocks = n_embd / 32;
-            let row_bytes = blocks * 34;
-            let src = (model + data_start + (ow_t.data_offset as i64) + vv * row_bytes) as ptr[u8];
-            dequant_q8_0_tensor(src, logit_r, blocks);
+        if (!dequant_row_tensor(model, data_start, ow_t, vv, logit_r)) {
+            return false;
         }
         var lp_dot: f32 = 0.0f;
         for j in 0..n_embd {
@@ -1280,7 +1458,7 @@ fn main() {
     println("[7] Enabling interrupts");
     interrupts_init();
     println("    timer at 100 Hz, keyboard ready");
-    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
+    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
     println("");
 
     var line_buf = alloc([u8; 128]) as ptr[u8];
@@ -1689,6 +1867,28 @@ fn main() {
                             println("'");
                         }
                     }
+                } else if (starts_with(text, "q4ktest")) {
+                    if (mb_module_count() == 0 as u32) {
+                        println("  no module loaded");
+                    } else {
+                        let qm = mb_module_start(0 as u32) as ptr[u8];
+                        let qdata = model_data_start(qm);
+                        let qtc = read_u64(qm, 8);
+                        let qkc = read_u64(qm, 16);
+                        let qts = skip_kv_block(qm, 24, qkc);
+                        let qt = tensor_by_name(qm, qts, qtc, "test.weight");
+                        let qbuf = scratch_bytes as ptr[f32];
+                        dequant_q4_k_block(qm + qdata + (qt.data_offset as i64), qbuf);
+                        var qsum: f32 = 0.0f;
+                        for qi in 0..256 { qsum = qsum + qbuf[qi]; }
+                        let qx = (scratch_bytes + 1024) as ptr[f32];
+                        let qy = (scratch_bytes + 2048) as ptr[f32];
+                        for qi in 0..256 {
+                            qx[qi] = ((qi % 7) - 3) as f32;
+                        }
+                        matvec_q4_k(qm, qdata, qt, qx, qy, 1, 256);
+                        println("  q4k sum={qsum} dot={qy[0]}");
+                    }
                 } else if (starts_with(text, "bench")) {
                     if (mb_module_count() == 0 as u32) {
                         println("  no module loaded");
@@ -2039,7 +2239,7 @@ fn main() {
                         println("    no help for that topic");
                     }
                 } else if (starts_with(text, "help")) {
-                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
+                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
                 } else if (line_len > 0) {
                     println("  {text}");
                 }

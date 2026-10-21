@@ -17,8 +17,10 @@
      1  F16     2 bytes per element
      2  Q4_0    32 elements per 18 bytes
      8  Q8_0    32 elements per 34 bytes
-     10 Q2_K    32 elements per 84 bytes
-     12 Q4_K    32 elements per 144 bytes */
+     10 Q2_K    256 elements per 84 bytes
+     12 Q4_K    256 elements per 144 bytes
+     13 Q5_K    256 elements per 176 bytes
+     14 Q6_K    256 elements per 210 bytes */
 
 struct GGUFTensorInfo {
     name_offset: i64;
@@ -144,8 +146,17 @@ fn tensor_byte_size(t: GGUFTensorInfo) -> u64 {
     if (t.ggml_type == 2 as u32) {           /* Q4_0 */
         return (n / 32 as u64) * 18 as u64;
     }
+    if (t.ggml_type == 10 as u32) {          /* Q2_K */
+        return (n / 256 as u64) * 84 as u64;
+    }
     if (t.ggml_type == 12 as u32) {          /* Q4_K */
-        return (n / 32 as u64) * 144 as u64;
+        return (n / 256 as u64) * 144 as u64;
+    }
+    if (t.ggml_type == 13 as u32) {          /* Q5_K */
+        return (n / 256 as u64) * 176 as u64;
+    }
+    if (t.ggml_type == 14 as u32) {          /* Q6_K */
+        return (n / 256 as u64) * 210 as u64;
     }
     println("unsupported ggml_type = {t.ggml_type}");
     panic("gguf: unsupported tensor type for size computation");

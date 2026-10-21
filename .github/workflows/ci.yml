@@ -51,6 +51,8 @@ jobs:
           python3 tools/verify_gqa.py build/gqa.gguf
           python3 tools/gen_merge_gguf.py build/merge.gguf
           python3 tools/verify_merge.py build/merge.gguf
+          python3 tools/gen_q4k_gguf.py build/q4k.gguf
+          python3 tools/verify_q4k.py build/q4k.gguf
 
 # QEMU/inference smoke tests are intentionally not run here: they require
 # qemu-system-i386 and a GGUF model, neither of which is tracked in Git.
