@@ -8,6 +8,8 @@
   tied token embedding/output, GQA 9/3, configurable RoPE base (100000), a
   256-position context cap, and a SmolLM `selftest` profile.
 - Added `MODELS.md` with TinyStories and SmolLM2 profiles and test recipes.
+- Decode `<0xNN>` byte tokens in story output and document TinyStories
+  prompt-based story requests.
 - Added `ask` with SmolLM2 Instruct ChatML tokens and `<|im_end|>` stopping.
   Ask prefill prints progress/timing and is Ctrl+C-cancellable; the fixed
   ChatML system/user prefix is cached across questions; `keytest` diagnoses

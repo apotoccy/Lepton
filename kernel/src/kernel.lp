@@ -125,9 +125,36 @@ fn decode_tok(model: ptr[u8], tok_table: ptr[u32], tok_count: i64,
     return read_str(model, off + 8, len);
 }
 
+fn hex_digit(c: u8) -> i32 {
+    if (c >= 48 as u8 && c <= 57 as u8) { return (c as i32) - 48; }
+    if (c >= 65 as u8 && c <= 70 as u8) { return (c as i32) - 55; }
+    if (c >= 97 as u8 && c <= 102 as u8) { return (c as i32) - 87; }
+    return -1;
+}
+
 fn print_token(s: str) -> void {
     var len: i64 = 0;
     while (s[len] != '\0') { len = len + 1; }
+    if (len == 6 && s[0] == '<' && s[1] == '0' && s[2] == 'x'
+            && s[5] == '>') {
+        let hi = hex_digit(s[3] as u8);
+        let lo = hex_digit(s[4] as u8);
+        if (hi >= 0 && lo >= 0) {
+            let b = hi * 16 + lo;
+            if (b == 10 || b == 13) {
+                print("\n");
+            } else if (b >= 32 && b < 127) {
+                let c = b as char;
+                print("{c}");
+            } else {
+                print("<0x");
+                let c3 = s[3]; print("{c3}");
+                let c4 = s[4]; print("{c4}");
+                print(">");
+            }
+            return;
+        }
+    }
     var i: i64 = 0;
     while (i < len) {
         if (i + 2 < len

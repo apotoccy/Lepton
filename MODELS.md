@@ -16,6 +16,16 @@ Lepton currently has two practical test profiles.
 - Weights: Q4_0/Q8_0/F32 norms
 - Tokenizer: SentencePiece-style `▁`
 
+TinyStories can follow simple story requests with a clear prompt:
+
+```text
+genprompt "Write a story about a brave mouse." 0 1 40
+  The mouse was so brave that he decided to go on an adventure...
+```
+
+It is still a base completion model: it may ignore length, setting, or moral
+constraints. Use an Instruct model for reliable instruction following.
+
 Use it for:
 
 - fast compiler/kernel regression;
