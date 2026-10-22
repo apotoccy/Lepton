@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Added `chat`, a multi-turn ChatML mode with a persistent system prefix,
+  conversation KV state, `ctx` status, `/exit`, and Ctrl+C cancellation.
+- Added chat-aware prompts and line redraws (`you>`) while preserving the
+  raw `lepton>` REPL.
+
 ## v0.3.1 — 2026-10-22
 
 - Fixed REPL backspace echo: `\b` is not a Lepton string escape, so the raw

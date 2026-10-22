@@ -116,6 +116,10 @@ cursor editing, eight-entry history, tab completion, and Ctrl+C/Ctrl+L.
   Instruct GGUF and stops at `<|im_end|>`. The fixed system/user ChatML prefix
   is cached after the first ask; later questions prefill only the question and
   assistant header. Progress/timing are printed; Ctrl+C cancels.
+- `chat` — multi-turn ChatML mode. The system prefix is built once, each
+  turn appends user/assistant tokens to the KV cache, `ctx N/256` reports
+  usage, `/exit` leaves, and Ctrl+C cancels. The raw `lepton>` REPL remains
+  available outside chat.
 - `keytest` — print raw keyboard events for five seconds.
 - `stop "<text>"` — set a stop sequence for generation; `stop` clears it.
 - `selftest` — deterministic TinyStories forward check.

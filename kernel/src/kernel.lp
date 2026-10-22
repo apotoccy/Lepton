@@ -1789,10 +1789,11 @@ fn line_same(a: ptr[u8], a_len: i64, b: ptr[u8], b_len: i64) -> bool {
 
 /* Redraw the prompt and line, then restore the cursor position. */
 fn line_redraw(buf: ptr[u8], len: i64, cursor: i64,
-               old_len: i64) -> void {
+               old_len: i64, chat: i32) -> void {
     print("\r");
     vga_set_color(0x0A as u8);
-    print("lepton> ");
+    if (chat == 1) { print("you> "); }
+    else { print("lepton> "); }
     vga_set_color(0x0F as u8);
     var i: i64 = 0;
     while (i < len) {
@@ -2216,7 +2217,7 @@ fn main() {
     println("[7] Enabling interrupts");
     interrupts_init();
     println("    timer at 100 Hz, keyboard ready");
-    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, ask [n], keytest, stop, mem, selftest, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
+    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, ask [n], chat, keytest, stop, mem, selftest, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
     println("");
 
     var line_buf = alloc([u8; 128]) as ptr[u8];
@@ -2230,6 +2231,12 @@ fn main() {
     var stop_len: i64 = 0;
     var ask_prefix_valid: i32 = 0;
     var ask_prefix_len: i64 = 0;
+    var chat_mode: i32 = 0;
+    let chat_ids = alloc([u32; 512]) as ptr[u32];
+    var chat_len: i64 = 0;
+    var chat_kv_len: i64 = 0;
+    var chat_ims: i64 = -1;
+    var chat_ime: i64 = -1;
 
     vga_set_color(0x0A as u8);
     print("lepton> ");
@@ -2248,7 +2255,7 @@ fn main() {
                 line_len = history_load(history_buf, history_len,
                                         history_pos, line_buf);
                 cursor = line_len;
-                line_redraw(line_buf, line_len, cursor, old_len);
+                line_redraw(line_buf, line_len, cursor, old_len, chat_mode);
             }
             continue;
         }
@@ -2264,7 +2271,7 @@ fn main() {
                                             history_pos, line_buf);
                     cursor = line_len;
                 }
-                line_redraw(line_buf, line_len, cursor, old_len);
+                line_redraw(line_buf, line_len, cursor, old_len, chat_mode);
             }
             continue;
         }
@@ -2305,7 +2312,7 @@ fn main() {
                     i = i + 1;
                 }
                 line_len = line_len - 1;
-                line_redraw(line_buf, line_len, cursor, old_len);
+                line_redraw(line_buf, line_len, cursor, old_len, chat_mode);
                 history_pos = history_n;
             }
             continue;
@@ -2316,7 +2323,7 @@ fn main() {
             if (nl > line_len) {
                 line_len = nl;
                 cursor = nl;
-                line_redraw(line_buf, line_len, cursor, old_len);
+                line_redraw(line_buf, line_len, cursor, old_len, chat_mode);
             }
             continue;
         }
@@ -2327,13 +2334,14 @@ fn main() {
             cursor = 0;
             history_pos = history_n;
             vga_set_color(0x0A as u8);
-            print("lepton> ");
+            if (chat_mode == 1) { print("you> "); }
+            else { print("lepton> "); }
             vga_set_color(0x0F as u8);
             continue;
         }
         if (ev == 0x109) {          /* Ctrl+L */
             lp_clear_screen();
-            line_redraw(line_buf, line_len, cursor, line_len);
+            line_redraw(line_buf, line_len, cursor, line_len, chat_mode);
             continue;
         }
 
@@ -2355,7 +2363,7 @@ fn main() {
                     }
                     line_len = line_len - 1;
                     cursor = cursor - 1;
-                    line_redraw(line_buf, line_len, cursor, old_len);
+                    line_redraw(line_buf, line_len, cursor, old_len, chat_mode);
                     history_pos = history_n;
                 }
             } else if (ch == 10 as u8 || ch == 13 as u8) {
@@ -2365,7 +2373,132 @@ fn main() {
                 history_pos = history_n;
                 let cmd_mark = alloc_mark();
                 let text = read_str(line_buf, 0, line_len);
-                if (starts_with(text, "modules")) {
+                if (chat_mode == 1) {
+                    if (starts_with(text, "/exit")) {
+                        chat_mode = 0;
+                        chat_kv_len = 0;
+                        ask_prefix_valid = 0;
+                        println("  left chat mode");
+                    } else if (chat_len + line_len + 32 > active_cfg.max_seq) {
+                        println("  chat context is full; use /exit and start a new conversation");
+                    } else {
+                        let cm = mb_module_start(0 as u32) as ptr[u8];
+                        let cc = model_config(cm);
+                        let old_len = chat_len;
+                        chat_ids[chat_len] = chat_ims as u32; chat_len = chat_len + 1;
+                        let seg = alloc([u8; 256]) as ptr[u8];
+                        let ur = ask_text(seg, "user", true);
+                        chat_len = append_encoded(cm, tok_table, tok_count,
+                                                  merge_table, merge_count,
+                                                  seg, 0 as i64, ur,
+                                                  chat_ids, chat_len, 512);
+                        chat_len = append_encoded(cm, tok_table, tok_count,
+                                                  merge_table, merge_count,
+                                                  line_buf, 0 as i64, line_len,
+                                                  chat_ids, chat_len, 512);
+                        chat_ids[chat_len] = chat_ime as u32; chat_len = chat_len + 1;
+                        let nl = ask_text(seg, "", true);
+                        chat_len = append_encoded(cm, tok_table, tok_count,
+                                                  merge_table, merge_count,
+                                                  seg, 0 as i64, nl,
+                                                  chat_ids, chat_len, 512);
+                        chat_ids[chat_len] = chat_ims as u32; chat_len = chat_len + 1;
+                        let ar = ask_text(seg, "assistant", true);
+                        chat_len = append_encoded(cm, tok_table, tok_count,
+                                                  merge_table, merge_count,
+                                                  seg, 0 as i64, ar,
+                                                  chat_ids, chat_len, 512);
+                        if (!prefill_tokens(cm, cc, chat_ids, chat_kv_len,
+                                            chat_len - chat_kv_len,
+                                            scratch_bytes as ptr[f32],
+                                            kv_k_buf, kv_v_buf,
+                                            rope_freqs, logits_buf)) {
+                            chat_len = old_len;
+                            println("  chat prefill failed");
+                        } else {
+                            chat_kv_len = chat_len;
+                            print("lepton: ");
+                            var ended: i32 = 0;
+                            var ai: i64 = 0;
+                            let answer_max: i64 = 48;
+                            while (ai < answer_max && chat_len < cc.max_seq) {
+                                if (generation_cancelled()) { break; }
+                                let next = lp_sample(logits_buf,
+                                                     cc.vocab_size as i32,
+                                                     0.0f, 1);
+                                if (next as i64 == model_eos(cm) as i64
+                                        || next as i64 == chat_ime) {
+                                    let pos = chat_len;
+                                    chat_ids[chat_len] = chat_ime as u32;
+                                    chat_len = chat_len + 1;
+                                    if (forward_token_at_pos(cm, cc,
+                                                             chat_ime, pos,
+                                                             scratch_bytes as ptr[f32],
+                                                             activation_buf,
+                                                             kv_k_buf, kv_v_buf,
+                                                             rope_freqs, logits_buf)) {
+                                        chat_kv_len = chat_len;
+                                    }
+                                    ended = 1;
+                                    break;
+                                }
+                                let st = decode_tok(cm, tok_table, tok_count, next);
+                                print_token(st);
+                                let pos = chat_len;
+                                chat_ids[chat_len] = next as u32;
+                                chat_len = chat_len + 1;
+                                ai = ai + 1;
+                                if (!forward_token_at_pos(cm, cc, next as i64,
+                                                          pos,
+                                                          scratch_bytes as ptr[f32],
+                                                          activation_buf,
+                                                          kv_k_buf, kv_v_buf,
+                                                          rope_freqs, logits_buf)) {
+                                    ended = 1;
+                                    break;
+                                }
+                                chat_kv_len = chat_len;
+                            }
+                            if (ended == 0 && chat_len < cc.max_seq) {
+                                let pos = chat_len;
+                                chat_ids[chat_len] = chat_ime as u32;
+                                chat_len = chat_len + 1;
+                                if (forward_token_at_pos(cm, cc, chat_ime, pos,
+                                                         scratch_bytes as ptr[f32],
+                                                         activation_buf,
+                                                         kv_k_buf, kv_v_buf,
+                                                         rope_freqs, logits_buf)) {
+                                    chat_kv_len = chat_len;
+                                }
+                            }
+                            /* Newline after the assistant turn, as required by ChatML. */
+                            if (chat_len + 4 < cc.max_seq) {
+                                let oldn = chat_len;
+                                let nls = ask_text(seg, "", true);
+                                chat_len = append_encoded(cm, tok_table, tok_count,
+                                                          merge_table, merge_count,
+                                                          seg, 0 as i64, nls,
+                                                          chat_ids, chat_len, 512);
+                                var np = oldn;
+                                while (np < chat_len) {
+                                    if (!forward_token_at_pos(cm, cc,
+                                                              chat_ids[np] as i64,
+                                                              np,
+                                                              scratch_bytes as ptr[f32],
+                                                              activation_buf,
+                                                              kv_k_buf, kv_v_buf,
+                                                              rope_freqs, logits_buf)) {
+                                        break;
+                                    }
+                                    np = np + 1;
+                                }
+                                chat_kv_len = chat_len;
+                            }
+                            println("");
+                            println("  ctx {chat_len}/{cc.max_seq}");
+                        }
+                    }
+                } else if (starts_with(text, "modules")) {
                     let n = mb_module_count();
                     println("  {n} module(s)");
                     for i in 0..(n as i64) {
@@ -3036,6 +3169,63 @@ fn main() {
                                 }
                             }
                         }
+                } else if (starts_with(text, "chat")) {
+                    if (mb_module_count() == 0 as u32) {
+                        println("  no module loaded");
+                    } else {
+                        let cm = mb_module_start(0 as u32) as ptr[u8];
+                        let cc = model_config(cm);
+                        if (tok_count < 0) {
+                            tok_count = build_tok_offsets(cm, tok_table, cc.vocab_size);
+                        }
+                        if (merge_count < 0) {
+                            merge_count = build_merge_offsets(cm, merge_table);
+                            if (merge_count < 0) { merge_count = 0; }
+                        }
+                        chat_ims = token_id_exact(cm, tok_table, tok_count, "<|im_start|>");
+                        chat_ime = token_id_exact(cm, tok_table, tok_count, "<|im_end|>");
+                        if (chat_ims < 0 || chat_ime < 0) {
+                            println("  this model has no ChatML tokens");
+                        } else {
+                            let seg = alloc([u8; 256]) as ptr[u8];
+                            var cp: i64 = 0;
+                            chat_ids[cp] = chat_ims as u32; cp = cp + 1;
+                            let sr = ask_text(seg, "system", true);
+                            cp = append_encoded(cm, tok_table, tok_count,
+                                                merge_table, merge_count,
+                                                seg, 0 as i64, sr,
+                                                chat_ids, cp, 512);
+                            let sys = "You are a helpful AI assistant named SmolLM, trained by Hugging Face";
+                            var sy: i64 = 0;
+                            while (sys[sy] != '\0') { seg[sy] = sys[sy] as u8; sy = sy + 1; }
+                            cp = append_encoded(cm, tok_table, tok_count,
+                                                merge_table, merge_count,
+                                                seg, 0 as i64, sy,
+                                                chat_ids, cp, 512);
+                            chat_ids[cp] = chat_ime as u32; cp = cp + 1;
+                            let nl = ask_text(seg, "", true);
+                            cp = append_encoded(cm, tok_table, tok_count,
+                                                merge_table, merge_count,
+                                                seg, 0 as i64, nl,
+                                                chat_ids, cp, 512);
+                            chat_len = cp;
+                            chat_kv_len = 0;
+                            ask_prefix_valid = 0;
+                            clear_kv_cache(kv_k_buf, kv_v_buf,
+                                           active_cfg.n_layer, active_cfg.max_seq,
+                                           active_cfg.n_head_kv * active_cfg.head_dim);
+                            if (prefill_tokens(cm, cc, chat_ids, 0 as i64,
+                                               chat_len, scratch_bytes as ptr[f32],
+                                               kv_k_buf, kv_v_buf,
+                                               rope_freqs, logits_buf)) {
+                                chat_kv_len = chat_len;
+                                chat_mode = 1;
+                                println("  chat mode; /exit leaves, Ctrl+C cancels");
+                            } else {
+                                println("  chat prefill failed");
+                            }
+                        }
+                    }
                 } else if (starts_with(text, "keytest")) {
                     println("  press keys for 5 seconds...");
                     let kt0 = ticks();
@@ -3336,7 +3526,9 @@ fn main() {
                     } else if (starts_with(topic, "keytest")) {
                         println("    keytest - print keyboard events for five seconds");
                     } else if (starts_with(topic, "ask")) {
-                        println("    ask \"question\" [n] - ChatML question for SmolLM2 Instruct");
+                        println("    ask \"question\" [n] - one-shot ChatML question");
+                    } else if (starts_with(topic, "chat")) {
+                        println("    chat - multi-turn ChatML mode; /exit leaves; Ctrl+C cancels");
                     } else if (starts_with(topic, "stop")) {
                         println("    stop \"text\" - set a generation stop sequence; stop with no text clears");
                     } else if (starts_with(topic, "mem")) {
@@ -3351,7 +3543,7 @@ fn main() {
                         println("    no help for that topic");
                     }
                 } else if (starts_with(text, "help")) {
-                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, ask [n], keytest, stop, mem, selftest, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
+                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, ask [n], chat, keytest, stop, mem, selftest, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
                 } else if (line_len > 0) {
                     println("  {text}");
                 }
@@ -3359,7 +3551,8 @@ fn main() {
                 line_len = 0;
                 cursor = 0;
                 history_pos = history_n;
-                print("lepton> ");
+                if (chat_mode == 1) { print("you> "); }
+                else { print("lepton> "); }
             } else if (ch == 3 as u8) {       /* serial Ctrl+C */
                 print("^C");
                 println("");
@@ -3367,18 +3560,19 @@ fn main() {
                 cursor = 0;
                 history_pos = history_n;
                 vga_set_color(0x0A as u8);
-                print("lepton> ");
+                if (chat_mode == 1) { print("you> "); }
+                else { print("lepton> "); }
                 vga_set_color(0x0F as u8);
             } else if (ch == 12 as u8) {      /* serial Ctrl+L */
                 lp_clear_screen();
-                line_redraw(line_buf, line_len, cursor, line_len);
+                line_redraw(line_buf, line_len, cursor, line_len, chat_mode);
             } else if (ch == 9 as u8) {       /* serial Tab */
                 let old_len = line_len;
                 let nl = complete_line(line_buf, line_len, cursor);
                 if (nl > line_len) {
                     line_len = nl;
                     cursor = nl;
-                    line_redraw(line_buf, line_len, cursor, old_len);
+                    line_redraw(line_buf, line_len, cursor, old_len, chat_mode);
                 }
             } else if (ch >= 32 as u8 && ch < 127 as u8) {
                 if (line_len < 127) {
@@ -3399,7 +3593,7 @@ fn main() {
                         line_buf[cursor] = ch;
                         line_len = line_len + 1;
                         cursor = cursor + 1;
-                        line_redraw(line_buf, line_len, cursor, old_len);
+                        line_redraw(line_buf, line_len, cursor, old_len, chat_mode);
                         history_pos = history_n;
                     }
                 }
