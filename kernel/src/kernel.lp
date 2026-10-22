@@ -32,6 +32,7 @@ extern fn lp_reboot() -> void;
 extern fn lp_poweroff() -> void;
 
 
+/* Return true when the string starts with the given prefix. */
 fn starts_with(s: str, prefix: str) -> bool {
     var i = 0;
     while (prefix[i] != '\0') {
@@ -43,6 +44,7 @@ fn starts_with(s: str, prefix: str) -> bool {
     return true;
 }
 
+/* Parse a signed decimal integer starting at or after the offset. */
 fn parse_int_at(text: str, start: i64) -> i64 {
     var i = start;
     while (text[i] == ' ') { i = i + 1; }
@@ -58,6 +60,7 @@ fn parse_int_at(text: str, start: i64) -> i64 {
     return v * sign;
 }
 
+/* Return the offset just past a decimal integer. */
 fn parse_int_end(text: str, start: i64) -> i64 {
     var i = start;
     while (text[i] == ' ') { i = i + 1; }
@@ -70,6 +73,7 @@ fn parse_int_end(text: str, start: i64) -> i64 {
     return i;
 }
 
+/* Fill the token table with GGUF token offsets; return the token count. */
 fn build_tok_offsets(model: ptr[u8], tok_table: ptr[u32],
                      max_count: i64) -> i64 {
     let kc = read_u64(model, 16);
@@ -90,6 +94,7 @@ fn build_tok_offsets(model: ptr[u8], tok_table: ptr[u32],
     return count as i64;
 }
 
+/* Find the vocabulary ID whose token text exactly matches a string. */
 fn token_id_exact(model: ptr[u8], tok_table: ptr[u32],
                   tok_count: i64, name: str) -> i64 {
     var n: i64 = 0;
@@ -115,6 +120,7 @@ fn token_id_exact(model: ptr[u8], tok_table: ptr[u32],
     return -1;
 }
 
+/* Decode a token ID to text, returning empty on an out-of-range ID. */
 fn decode_tok(model: ptr[u8], tok_table: ptr[u32], tok_count: i64,
               tok_id: u32) -> str {
     if (tok_id as i64 >= tok_count) {
@@ -125,6 +131,7 @@ fn decode_tok(model: ptr[u8], tok_table: ptr[u32], tok_count: i64,
     return read_str(model, off + 8, len);
 }
 
+/* Convert an ASCII hexadecimal digit to 0..15, or -1. */
 fn hex_digit(c: u8) -> i32 {
     if (c >= 48 as u8 && c <= 57 as u8) { return (c as i32) - 48; }
     if (c >= 65 as u8 && c <= 70 as u8) { return (c as i32) - 55; }
@@ -132,6 +139,7 @@ fn hex_digit(c: u8) -> i32 {
     return -1;
 }
 
+/* Print token text, translating space markers and byte tokens. */
 fn print_token(s: str) -> void {
     var len: i64 = 0;
     while (s[len] != '\0') { len = len + 1; }
@@ -181,6 +189,7 @@ fn print_token(s: str) -> void {
     }
 }
 
+/* Return the aligned file offset where GGUF tensor data begins. */
 fn model_data_start(model: ptr[u8]) -> i64 {
     let tc = read_u64(model, 8);
     let kc = read_u64(model, 16);
@@ -196,12 +205,14 @@ fn model_data_start(model: ptr[u8]) -> i64 {
     return mds;
 }
 
+/* Read the model architecture parameters from GGUF metadata. */
 fn model_config(model: ptr[u8]) -> ModelConfig {
     let kv_count = read_u64(model, 16);
     let tensor_table = skip_kv_block(model, 24, kv_count);
     return load_model_config(model, tensor_table);
 }
 
+/* Return the TinyStories fallback configuration. */
 fn default_model_config() -> ModelConfig {
     return ModelConfig(
         architecture: "llama",
@@ -211,6 +222,7 @@ fn default_model_config() -> ModelConfig {
     );
 }
 
+/* Read the model BOS token ID, falling back to token 1. */
 fn model_bos(model: ptr[u8]) -> i64 {
     let kv_count = read_u64(model, 16);
     let off = find_kv(model, 24, kv_count, "tokenizer.ggml.bos_token_id");
@@ -218,6 +230,7 @@ fn model_bos(model: ptr[u8]) -> i64 {
     return read_u32(model, off) as i64;
 }
 
+/* Read the model EOS token ID, falling back to token 2. */
 fn model_eos(model: ptr[u8]) -> i64 {
     let kv_count = read_u64(model, 16);
     let off = find_kv(model, 24, kv_count, "tokenizer.ggml.eos_token_id");
@@ -227,6 +240,7 @@ fn model_eos(model: ptr[u8]) -> i64 {
 
 /* Shape and attention requirements of the current compiled path. GQA is
    parsed but not implemented yet. Returns an empty string when supported. */
+/* Return a human-readable unsupported-config reason, or an empty string. */
 fn config_issue(cfg: ModelConfig) -> str {
     if (cfg.architecture != "llama") {
         return "architecture is not supported (expected llama)";
@@ -254,6 +268,7 @@ fn config_issue(cfg: ModelConfig) -> str {
     return "";
 }
 
+/* Estimate the workspace bytes required by a model configuration. */
 fn config_memory_bytes(cfg: ModelConfig) -> i64 {
     var wide = cfg.n_embd;
     if (cfg.n_ff > wide) { wide = cfg.n_ff; }
@@ -271,10 +286,12 @@ fn config_memory_bytes(cfg: ModelConfig) -> i64 {
          + merge_table + line_buf + rope;
 }
 
+/* Return true when the configuration fits the workspace budget. */
 fn config_fits(cfg: ModelConfig) -> bool {
     return config_memory_bytes(cfg) <= 60 * 1024 * 1024;
 }
 
+/* Return true when the configuration shape and memory are usable. */
 fn config_allocatable(cfg: ModelConfig) -> bool {
     return cfg.n_embd > 0 && cfg.n_ff > 0 && cfg.n_layer > 0
         && cfg.n_head > 0 && cfg.n_head_kv > 0
@@ -285,6 +302,7 @@ fn config_allocatable(cfg: ModelConfig) -> bool {
         && cfg.vocab_size > 0 && config_fits(cfg);
 }
 
+/* Allocate bytes or panic with an out-of-memory message. */
 fn alloc_or_panic(n: i64) -> ptr[u8] {
     let p = lp_alloc_bytes(n);
     if (p == 0 as ptr[u8]) {
@@ -293,6 +311,7 @@ fn alloc_or_panic(n: i64) -> ptr[u8] {
     return p;
 }
 
+/* Print the parsed model hyperparameters. */
 fn print_model_config(cfg: ModelConfig) -> void {
     println("  arch      = {cfg.architecture}");
     println("  n_embd    = {cfg.n_embd}");
@@ -307,6 +326,7 @@ fn print_model_config(cfg: ModelConfig) -> void {
     println("  rope_base = {cfg.rope_base}");
 }
 
+/* Dequantize one Q4_0 tensor row. */
 fn dequant_row_q4_0(model: ptr[u8], data_start: i64,
                      t: GGUFTensorInfo, row: i64, out: ptr[f32]) -> void {
     let dim = t.dim0 as i64;
@@ -316,6 +336,7 @@ fn dequant_row_q4_0(model: ptr[u8], data_start: i64,
     dequant_q4_0_tensor(src, out, blocks);
 }
 
+/* Dequantize a complete Q4_0 tensor into f32. */
 fn dequant_tensor_q4_0(model: ptr[u8], data_start: i64,
                         t: GGUFTensorInfo, out: ptr[f32]) -> void {
     let n_total = (t.dim0 * t.dim1) as i64;
@@ -324,6 +345,7 @@ fn dequant_tensor_q4_0(model: ptr[u8], data_start: i64,
     dequant_q4_0_tensor(src, out, blocks);
 }
 
+/* Copy an F32 tensor into the scratch buffer. */
 fn copy_f32_tensor(model: ptr[u8], data_start: i64,
                     t: GGUFTensorInfo, out: ptr[f32]) -> void {
     let n_total = (t.dim0 * t.dim1) as i64;
@@ -334,6 +356,7 @@ fn copy_f32_tensor(model: ptr[u8], data_start: i64,
 }
 
 
+/* Multiply a Q4_0 matrix by an f32 vector. */
 fn matvec_q4_0(model: ptr[u8], data_start: i64,
                t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
                rows: i64, cols: i64) -> void {
@@ -359,6 +382,7 @@ fn matvec_q4_0(model: ptr[u8], data_start: i64,
     }
 }
 
+/* Multiply a Q8_0 matrix by an f32 vector. */
 fn matvec_q8_0(model: ptr[u8], data_start: i64,
                t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
                rows: i64, cols: i64) -> void {
@@ -381,6 +405,7 @@ fn matvec_q8_0(model: ptr[u8], data_start: i64,
 }
 
 
+/* Extract one 6-bit Q4_K scale value. */
 fn q4k_scale(scales: ptr[u8], j: i64) -> i32 {
     let q = scales[j] as i32;
     if (j < 4) { return q & 63; }
@@ -389,6 +414,7 @@ fn q4k_scale(scales: ptr[u8], j: i64) -> i32 {
     return (q4 & 0x0F) | ((qm >> 6) << 4);
 }
 
+/* Extract one 6-bit Q4_K minimum value. */
 fn q4k_min(scales: ptr[u8], j: i64) -> i32 {
     if (j < 4) { return (scales[j + 4] as i32) & 63; }
     let q4 = scales[j + 4] as i32;
@@ -396,6 +422,7 @@ fn q4k_min(scales: ptr[u8], j: i64) -> i32 {
     return (q4 >> 4) | (((qm >> 4) & 0x03) << 4);
 }
 
+/* Dequantize one 256-value Q4_K block. */
 fn dequant_q4_k_block(src: ptr[u8], dst: ptr[f32]) -> void {
     let d = read_f16(src, 0);
     let dmin = read_f16(src, 2);
@@ -423,6 +450,7 @@ fn dequant_q4_k_block(src: ptr[u8], dst: ptr[f32]) -> void {
     }
 }
 
+/* Dequantize one embedding or output row for a supported tensor type. */
 fn dequant_row_tensor(model: ptr[u8], data_start: i64,
                       t: GGUFTensorInfo, row: i64,
                       out: ptr[f32]) -> bool {
@@ -489,6 +517,7 @@ fn dequant_row_tensor(model: ptr[u8], data_start: i64,
 }
 
 
+/* Dequantize one 32-value Q5_0 block. */
 fn dequant_q5_0_block(src: ptr[u8], dst: ptr[f32]) -> void {
     let d = read_f16(src, 0);
     let qh = read_u32(src, 2);
@@ -504,6 +533,7 @@ fn dequant_q5_0_block(src: ptr[u8], dst: ptr[f32]) -> void {
     }
 }
 
+/* Dequantize one 32-value Q5_1 block. */
 fn dequant_q5_1_block(src: ptr[u8], dst: ptr[f32]) -> void {
     let d = read_f16(src, 0);
     let m = read_f16(src, 2);
@@ -520,6 +550,7 @@ fn dequant_q5_1_block(src: ptr[u8], dst: ptr[f32]) -> void {
     }
 }
 
+/* Multiply a Q5_0 matrix by an f32 vector. */
 fn matvec_q5_0(model: ptr[u8], data_start: i64,
                t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
                rows: i64, cols: i64) -> void {
@@ -548,6 +579,7 @@ fn matvec_q5_0(model: ptr[u8], data_start: i64,
     }
 }
 
+/* Multiply a Q5_1 matrix by an f32 vector. */
 fn matvec_q5_1(model: ptr[u8], data_start: i64,
                t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
                rows: i64, cols: i64) -> void {
@@ -577,6 +609,7 @@ fn matvec_q5_1(model: ptr[u8], data_start: i64,
     }
 }
 
+/* Multiply a Q4_K matrix by an f32 vector. */
 fn matvec_q4_k(model: ptr[u8], data_start: i64,
                t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
                rows: i64, cols: i64) -> void {
@@ -617,6 +650,7 @@ fn matvec_q4_k(model: ptr[u8], data_start: i64,
     }
 }
 
+/* Multiply an F32 matrix by an f32 vector. */
 fn matvec_f32(model: ptr[u8], data_start: i64,
               t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
               rows: i64, cols: i64) -> void {
@@ -631,6 +665,7 @@ fn matvec_f32(model: ptr[u8], data_start: i64,
     }
 }
 
+/* Multiply an F16 matrix by an f32 vector. */
 fn matvec_f16(model: ptr[u8], data_start: i64,
               t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
               rows: i64, cols: i64) -> void {
@@ -646,6 +681,7 @@ fn matvec_f16(model: ptr[u8], data_start: i64,
 }
 
 
+/* Dequantize one 256-value Q5_K block. */
 fn dequant_q5_k_block(src: ptr[u8], dst: ptr[f32]) -> void {
     let d = read_f16(src, 0);
     let dmin = read_f16(src, 2);
@@ -680,6 +716,7 @@ fn dequant_q5_k_block(src: ptr[u8], dst: ptr[f32]) -> void {
     }
 }
 
+/* Dequantize one 256-value Q6_K block. */
 fn dequant_q6_k_block(src: ptr[u8], dst: ptr[f32]) -> void {
     let d = read_f16(src, 208);
     for chunk in 0..2 {
@@ -709,6 +746,7 @@ fn dequant_q6_k_block(src: ptr[u8], dst: ptr[f32]) -> void {
     }
 }
 
+/* Multiply a Q5_K matrix by an f32 vector. */
 fn matvec_q5_k(model: ptr[u8], data_start: i64,
                t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
                rows: i64, cols: i64) -> void {
@@ -756,6 +794,7 @@ fn matvec_q5_k(model: ptr[u8], data_start: i64,
     }
 }
 
+/* Multiply a Q6_K matrix by an f32 vector. */
 fn matvec_q6_k(model: ptr[u8], data_start: i64,
                t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
                rows: i64, cols: i64) -> void {
@@ -798,6 +837,7 @@ fn matvec_q6_k(model: ptr[u8], data_start: i64,
     }
 }
 
+/* Dispatch a matvec after validating tensor shape and type. */
 fn matvec_tensor(model: ptr[u8], data_start: i64,
                  t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
                  rows: i64, cols: i64) -> bool {
@@ -841,6 +881,7 @@ fn matvec_tensor(model: ptr[u8], data_start: i64,
     return true;
 }
 
+/* Apply RMSNorm with per-element weights. */
 fn rmsnorm_n(x: ptr[f32], w: ptr[f32], out: ptr[f32], n: i64,
               eps: f32) -> void {
     var ss: f32 = 0.0f;
@@ -854,6 +895,7 @@ fn rmsnorm_n(x: ptr[f32], w: ptr[f32], out: ptr[f32], n: i64,
     }
 }
 
+/* Multiply a dense f32 matrix by a vector. */
 fn matvec_rows(W: ptr[f32], x: ptr[f32], y: ptr[f32],
                 rows: i64, cols: i64) -> void {
     for i in 0..rows {
@@ -865,10 +907,12 @@ fn matvec_rows(W: ptr[f32], x: ptr[f32], y: ptr[f32],
     }
 }
 
+/* Evaluate the SiLU activation function. */
 fn silu_f32(x: f32) -> f32 {
     return x / (1.0f + exp(0.0f - x));
 }
 
+/* Build the RoPE inverse-frequency table for a head dimension and base. */
 fn build_rope_freqs(freqs: ptr[f64], head_dim: i64,
                     base: f32) -> void {
     /* freqs[i] = base^(-2i/head_dim). */
@@ -883,6 +927,7 @@ fn build_rope_freqs(freqs: ptr[f64], head_dim: i64,
     }
 }
 
+/* Rotate Q or K vectors by position using interleaved RoPE. */
 fn rope_apply(x: ptr[f32], pos: i64, freqs: ptr[f64],
               n_head: i64, head_dim: i64) -> void {
     /* Interleaved convention: pairs (2i, 2i+1) within each head, rotated by pos*freqs[i]. */
@@ -901,6 +946,7 @@ fn rope_apply(x: ptr[f32], pos: i64, freqs: ptr[f64],
     }
 }
 
+/* Normalize a score vector to probabilities in place. */
 fn softmax_inplace(x: ptr[f32], n: i64) -> void {
     var maxv: f32 = x[0];
     for i in 1..n {
@@ -918,6 +964,7 @@ fn softmax_inplace(x: ptr[f32], n: i64) -> void {
     }
 }
 
+/* Run one LLaMA forward pass and produce logits for a token at a position. */
 fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
                         token: i64, pos: i64,
                         wbuf: ptr[f32], act: ptr[f32],
@@ -1103,6 +1150,7 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
     return true;
 }
 
+/* Parse a decimal floating-point number starting at or after the offset. */
 fn parse_float_at(text: str, start: i64) -> f32 {
     var i = start;
     while (text[i] == ' ') { i = i + 1; }
@@ -1130,6 +1178,7 @@ fn parse_float_at(text: str, start: i64) -> f32 {
     return sign * (ip + fp / div);
 }
 
+/* Return the offset just past a decimal floating-point number. */
 fn parse_float_end(text: str, start: i64) -> i64 {
     var i = start;
     while (text[i] == ' ') { i = i + 1; }
@@ -1145,6 +1194,7 @@ fn parse_float_end(text: str, start: i64) -> i64 {
     return i;
 }
 
+/* Fill the merge table with GGUF merge offsets; return the merge count. */
 fn build_merge_offsets(model: ptr[u8], merge_table: ptr[u32]) -> i64 {
     let kc = read_u64(model, 16);
     let vo = find_kv(model, 24, kc, "tokenizer.ggml.merges");
@@ -1164,6 +1214,7 @@ fn build_merge_offsets(model: ptr[u8], merge_table: ptr[u32]) -> i64 {
     return count as i64;
 }
 
+/* Compare a GGUF byte string with a slice of the piece buffer. */
 fn piece_eq(model: ptr[u8], a_off: i64, a_len: i64,
             b_buf: ptr[u8], b_off: i64, b_len: i64) -> bool {
     if (a_len != b_len) { return false; }
@@ -1177,6 +1228,7 @@ fn piece_eq(model: ptr[u8], a_off: i64, a_len: i64,
     return true;
 }
 
+/* Zero the K/V cache for every layer and position. */
 fn clear_kv_cache(kv_k: ptr[f32], kv_v: ptr[f32],
                   n_layer: i64, max_seq: i64, n_kv: i64) -> void {
     for i in 0..(n_layer * max_seq * n_kv) {
@@ -1185,6 +1237,7 @@ fn clear_kv_cache(kv_k: ptr[f32], kv_v: ptr[f32],
     }
 }
 
+/* Find the <0xNN> token for a byte, or return -1. */
 fn byte_token_id(model: ptr[u8], tok_table: ptr[u32],
                   tok_count: i64, b: u8) -> i64 {
     var name: [u8; 7] = {60, 48, 120, 0, 0, 62, 0};
@@ -1216,6 +1269,7 @@ fn byte_token_id(model: ptr[u8], tok_table: ptr[u32],
     return -1;
 }
 
+/* BPE-encode one word or piece run into token IDs. */
 fn bpe_encode_word(model: ptr[u8],
                    tok_table: ptr[u32], tok_count: i64,
                    merge_table: ptr[u32], merge_count: i64,
@@ -1402,6 +1456,7 @@ fn bpe_encode_word(model: ptr[u8],
     return m_n;
 }
 
+/* Return true when the GGUF tokenizer model is gpt2. */
 fn model_is_gpt2(model: ptr[u8]) -> bool {
     let kc = read_u64(model, 16);
     let off = find_kv(model, 24, kc, "tokenizer.ggml.model");
@@ -1414,11 +1469,13 @@ fn model_is_gpt2(model: ptr[u8]) -> bool {
         && read_u8(model, off + 11) == 50 as u8;
 }
 
+/* Return true when a byte is printable in the GPT-2 byte map. */
 fn gpt2_printable(b: i64) -> bool {
     return (b >= 33 && b <= 126) || (b >= 161 && b <= 172)
         || (b >= 174 && b <= 255);
 }
 
+/* Map a byte to its GPT-2 byte-level Unicode codepoint. */
 fn gpt2_codepoint(b: i64) -> i64 {
     if (gpt2_printable(b)) { return b; }
     var n: i64 = 0;
@@ -1430,6 +1487,7 @@ fn gpt2_codepoint(b: i64) -> i64 {
     return 256 + n;
 }
 
+/* Append a Unicode codepoint encoded as UTF-8. */
 fn append_utf8(cp: i64, buf: ptr[u8], pos: i64) -> i64 {
     if (cp < 0x80) {
         buf[pos] = cp as u8;
@@ -1446,6 +1504,7 @@ fn append_utf8(cp: i64, buf: ptr[u8], pos: i64) -> i64 {
     return pos + 3;
 }
 
+/* Encode text with the GPT-2 byte-level BPE tokenizer. */
 fn encode_prompt_gpt2(model: ptr[u8],
                       tok_table: ptr[u32], tok_count: i64,
                       merge_table: ptr[u32], merge_count: i64,
@@ -1473,6 +1532,7 @@ fn encode_prompt_gpt2(model: ptr[u8],
     return np;
 }
 
+/* Choose GPT-2 or SentencePiece prompt encoding. */
 fn encode_prompt_dispatch(model: ptr[u8],
                           tok_table: ptr[u32], tok_count: i64,
                           merge_table: ptr[u32], merge_count: i64,
@@ -1488,6 +1548,7 @@ fn encode_prompt_dispatch(model: ptr[u8],
                          text_buf, text_start, text_end, out_ids);
 }
 
+/* Encode SentencePiece-style words with BPE or greedy fallback. */
 fn encode_prompt(model: ptr[u8],
                  tok_table: ptr[u32], tok_count: i64,
                  merge_table: ptr[u32], merge_count: i64,
@@ -1538,6 +1599,7 @@ fn encode_prompt(model: ptr[u8],
     return total;
 }
 
+/* Parse a quoted argument into a bounded byte buffer. */
 fn parse_quoted(text: str, start: i64, out_buf: ptr[u8],
                 max_len: i64) -> i64 {
     var i = start;
@@ -1558,6 +1620,7 @@ fn parse_quoted(text: str, start: i64, out_buf: ptr[u8],
     return -1;
 }
 
+/* Copy n bytes between line or history buffers. */
 fn line_copy(dst: ptr[u8], src: ptr[u8], n: i64) -> void {
     var i: i64 = 0;
     while (i < n) {
@@ -1566,6 +1629,7 @@ fn line_copy(dst: ptr[u8], src: ptr[u8], n: i64) -> void {
     }
 }
 
+/* Compare two byte buffers of the given lengths. */
 fn line_same(a: ptr[u8], a_len: i64, b: ptr[u8], b_len: i64) -> bool {
     if (a_len != b_len) { return false; }
     var i: i64 = 0;
@@ -1576,6 +1640,7 @@ fn line_same(a: ptr[u8], a_len: i64, b: ptr[u8], b_len: i64) -> bool {
     return true;
 }
 
+/* Redraw the prompt and line, then restore the cursor position. */
 fn line_redraw(buf: ptr[u8], len: i64, cursor: i64,
                old_len: i64) -> void {
     print("\r");
@@ -1601,6 +1666,7 @@ fn line_redraw(buf: ptr[u8], len: i64, cursor: i64,
     }
 }
 
+/* Add a line to the eight-entry history, suppressing duplicates. */
 fn history_add(hist: ptr[u8], hist_len: ptr[u8], hist_n: i64,
                line: ptr[u8], len: i64) -> i64 {
     if (len <= 0) { return hist_n; }
@@ -1639,6 +1705,7 @@ fn history_add(hist: ptr[u8], hist_len: ptr[u8], hist_n: i64,
     return hist_n + 1;
 }
 
+/* Copy a history entry into the line buffer and return its length. */
 fn history_load(hist: ptr[u8], hist_len: ptr[u8], idx: i64,
                 line: ptr[u8]) -> i64 {
     let n = hist_len[idx] as i64;
@@ -1646,6 +1713,7 @@ fn history_load(hist: ptr[u8], hist_len: ptr[u8], idx: i64,
     return n;
 }
 
+/* Return true when a string starts with the supplied buffer bytes. */
 fn buf_prefix(s: str, buf: ptr[u8], n: i64) -> bool {
     var i: i64 = 0;
     while (i < n) {
@@ -1656,6 +1724,7 @@ fn buf_prefix(s: str, buf: ptr[u8], n: i64) -> bool {
     return true;
 }
 
+/* Complete a unique command prefix at the end of the line. */
 fn complete_line(buf: ptr[u8], len: i64, cursor: i64) -> i64 {
     if (cursor != len || len <= 0) { return len; }
     var i: i64 = 0;
@@ -1692,6 +1761,7 @@ fn complete_line(buf: ptr[u8], len: i64, cursor: i64) -> i64 {
     return len;
 }
 
+/* Append decoded text to the stop tail, normalizing space markers. */
 fn tail_append(tail: ptr[u8], tail_len: i64, text: str,
                max_len: i64) -> i64 {
     /* Normalize the sentencepiece marker U+2581 to a plain space so
@@ -1743,6 +1813,7 @@ fn tail_append(tail: ptr[u8], tail_len: i64, text: str,
     return len + outn;
 }
 
+/* Return true when the tail ends with the configured stop sequence. */
 fn stop_match(tail: ptr[u8], tail_len: i64,
               stop: ptr[u8], stop_len: i64) -> bool {
     if (stop_len <= 0 || tail_len < stop_len) { return false; }
@@ -1754,11 +1825,13 @@ fn stop_match(tail: ptr[u8], tail_len: i64,
     return true;
 }
 
+/* Poll the keyboard and report Ctrl+C without consuming normal input. */
 fn generation_cancelled() -> bool {
     kbd_poll();
     return kbd_cancel_pending() != 0 as u32;
 }
 
+/* Encode a text slice and append its token IDs to the output. */
 fn append_encoded(model: ptr[u8], tok_table: ptr[u32], tok_count: i64,
                   merge_table: ptr[u32], merge_count: i64,
                   text_buf: ptr[u8], start: i64, end: i64,
@@ -1777,6 +1850,7 @@ fn append_encoded(model: ptr[u8], tok_table: ptr[u32], tok_count: i64,
     return p;
 }
 
+/* Copy a string into a segment buffer, optionally adding a newline. */
 fn ask_text(seg: ptr[u8], text: str, extra_nl: bool) -> i64 {
     var n: i64 = 0;
     while (text[n] != '\0') {
@@ -1790,6 +1864,7 @@ fn ask_text(seg: ptr[u8], text: str, extra_nl: bool) -> i64 {
     return n;
 }
 
+/* Boot the kernel, run self-checks, and start the interactive REPL. */
 fn main() {
     serial_init();
     vga_init();
