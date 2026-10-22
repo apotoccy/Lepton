@@ -75,7 +75,8 @@ checklist item rather than a completed validation.
 - SmolLM2-135M is validated in QEMU: config, GPT-2 tokenization, tied output,
   GQA, RoPE base 100000, prompt prefill, generation, and `selftest`
   (BOS 29, prompt 28). `ask` is validated with the Instruct Q4_0 variant
-  (`2 + 2 = 4.`); Q4_K_S/Q4_K_M from that repository need Q5_0 support.
+  (`2 + 2 = 4.`); Q5_0/Q5_1 support is implemented and fixture-validated,
+  but Q4_K_M still produced incorrect text.
   `selftest` remains base-profile-specific; use `ask` for Instruct.
   QEMU ask baseline: ~87 s for the first 37-token ChatML prefill and ~32 s
   for later questions after the prefix cache. Use `keytest` to separate

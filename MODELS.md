@@ -241,8 +241,10 @@ invalidated by `generate`, `genprompt`, `fwdpos`, `bench`, `gqapair`,
 can still take several minutes; use Ctrl+C and `keytest` to distinguish input
 failure from prefill waiting.
 
-The Q4_K_S/Q4_K_M variants from that repository mix in Q5_0 tensors, which
-the kernel does not support yet. Use Q4_0 for now.
+Q5_0/Q5_1 block support is now implemented and fixture-validated. However, the
+QuantFactory Q4_K_M file still produced incorrect text during testing, while
+the Q4_0 file answers correctly. Treat Q4_0 as the verified Instruct profile;
+Q4_K_M remains under investigation.
 
 `selftest` is a base-profile check; on the Instruct model it reports a skip.
 Use `ask` for Instruct validation.

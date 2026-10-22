@@ -13,8 +13,9 @@
   ChatML system/user prefix is cached across questions; `keytest` diagnoses
   raw keyboard events.
   Validated with `SmolLM2-135M-Instruct.Q4_0.gguf`
-  (`ask "What is 2+2?" 8` → `2 + 2 = 4.`). The Q4_K_S/Q4_K_M variants use
-  Q5_0 tensors and are not supported yet.
+  (`ask "What is 2+2?" 8` → `2 + 2 = 4.`). Q5_0/Q5_1 block support was added
+  and fixture-validated, but Q4_K_M still produced incorrect output and
+  remains under investigation.
 
 ## v0.3.0 — 2026-10-21
 

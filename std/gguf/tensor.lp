@@ -16,6 +16,8 @@
      0  F32     4 bytes per element
      1  F16     2 bytes per element
      2  Q4_0    32 elements per 18 bytes
+     6  Q5_0    32 elements per 22 bytes
+     7  Q5_1    32 elements per 24 bytes
      8  Q8_0    32 elements per 34 bytes
      10 Q2_K    256 elements per 84 bytes
      12 Q4_K    256 elements per 144 bytes
@@ -139,6 +141,12 @@ fn tensor_byte_size(t: GGUFTensorInfo) -> u64 {
     }
     if (t.ggml_type == 1 as u32) {           /* F16 */
         return n * 2 as u64;
+    }
+    if (t.ggml_type == 6 as u32) {           /* Q5_0 */
+        return (n / 32 as u64) * 22 as u64;
+    }
+    if (t.ggml_type == 7 as u32) {           /* Q5_1 */
+        return (n / 32 as u64) * 24 as u64;
     }
     if (t.ggml_type == 8 as u32) {           /* Q8_0 */
         return (n / 32 as u64) * 34 as u64;

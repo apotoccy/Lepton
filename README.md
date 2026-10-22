@@ -412,8 +412,8 @@ These are the boundaries of the current implementation, not a wish list; see
 
 - **Model dimensions.** Activation, KV, logits, and token-table workspaces are
   sized from GGUF metadata, subject to a 60 MB budget and a 256-position
-  context cap. Q4_0/Q8_0/Q4_K/Q5_K/Q6_K weights and F16/F32 fallbacks are
-  supported. Tokenizer buffers are capacity-checked for the line and prompt
+  context cap. Q4_0/Q5_0/Q5_1/Q8_0/Q4_K/Q5_K/Q6_K weights and F16/F32
+  fallbacks are supported. Tokenizer buffers are capacity-checked for the line and prompt
   limits.
 - **Context safety.** The configured `max_seq` is enforced by the forward guard
   and generation loops, with a hard cap of 256 KV positions. The KV cache is
@@ -432,8 +432,8 @@ These are the boundaries of the current implementation, not a wish list; see
   before the mark. Heap allocation failures are checked, and the heap is
   bounded by the Multiboot memory map (capped at 64 MB, minimum 8 MB after the
   loaded module).
-- **Quantization coverage.** Q4_0, Q8_0, Q4_K, Q5_K, and Q6_K are implemented,
-  plus F16 and F32 fallbacks.
+- **Quantization coverage.** Q4_0, Q5_0, Q5_1, Q8_0, Q4_K, Q5_K, and Q6_K
+  are implemented, plus F16 and F32 fallbacks.
 - **Freestanding file I/O.** `lp_file_size`, `lp_read_file_at`, and
   `lp_write_file` are defined in the kernel and return `-1`; there is no
   filesystem driver. Hosted builds use real file I/O.

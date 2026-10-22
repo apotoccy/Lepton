@@ -66,7 +66,8 @@ The model runtime is self-contained and written in Lepton plus a small
 freestanding C runtime.
 
 - **GGUF.** Parses the header, metadata KV pairs, tensor table, and alignment.
-- **Quantization.** Q4_0, Q8_0, Q4_K, Q5_K, Q6_K, F16, and F32 weights.
+- **Quantization.** Q4_0, Q5_0, Q5_1, Q8_0, Q4_K, Q5_K, Q6_K, F16, and F32
+  weights.
   F32 norm tensors are handled directly.
 - **Transformer.** LLaMA-style forward pass with token embeddings, multi-head
   attention, RoPE, a per-layer KV cache, RMSNorm, and a SwiGLU MLP.
