@@ -30,6 +30,7 @@ if __name__ == '__main__':
 #  Errors
 # =============================================================================
 class CompileError(Exception):
+    # Initialise a located compiler error.
     def __init__(self, msg, line=0, col=0, fname="<input>"):
         self.msg, self.line, self.col, self.fname = msg, line, col, fname
         super().__init__(f"{fname}:{line}:{col}: error: {msg}")
@@ -38,9 +39,11 @@ class CompileError(Exception):
 class CompileWarning:
     """A non-fatal compiler diagnostic."""
 
+    # Initialise a non-fatal compiler diagnostic.
     def __init__(self, msg, line=0, col=0, fname="<input>"):
         self.msg, self.line, self.col, self.fname = msg, line, col, fname
 
+    # Format the warning with its source location.
     def __str__(self):
         return f"{self.fname}:{self.line}:{self.col}: warning: {self.msg}"
 
@@ -66,10 +69,12 @@ ESCAPES = {'n': '\n', 't': '\t', 'r': '\r', '\\': '\\', '"': '"',
            "'": "'", '0': '\0'}
 
 
+# Tokenise Lepton source text into (kind, value, line, column) tuples.
 def lex(src: str, fname: str):
     toks = []
     i, line, col, n = 0, 1, 1, len(src)
 
+    # Advance the lexer position while tracking lines and columns.
     def adv(k=1):
         nonlocal i, line, col
         for _ in range(k):
@@ -225,11 +230,13 @@ def lex(src: str, fname: str):
 class Node:
     """AST node. `pos` is a (line, col) tuple, or None for synthetic nodes."""
 
+    # Initialise an AST node with its kind, position, and fields.
     def __init__(self, kind, pos=None, **kw):
         self.kind = kind
         self.pos = pos
         self.__dict__.update(kw)
 
+    # Return a short debug representation of the node kind.
     def __repr__(self):
         return f"<{self.kind}>"
 
@@ -253,33 +260,41 @@ class Parser:
     ASSIGN_OPS = {'=', '+=', '-=', '*=', '/=', '%=',
                   '&=', '|=', '^=', '<<=', '>>='}
 
+    # Initialise the parser over a token list.
     def __init__(self, toks, fname):
         self.toks, self.pos, self.fname = toks, 0, fname
 
     # ---- token helpers ----
+    # Return the token k positions ahead without consuming it.
     def peek(self, k=0):
         return self.toks[min(self.pos + k, len(self.toks) - 1)]
 
+    # Test whether the current token has the given kind and value.
     def at(self, kind, value=None):
         t = self.toks[self.pos]
         return t[0] == kind and (value is None or t[1] == value)
 
+    # Test whether the current token is the given operator.
     def at_op(self, v):
         return self.at('op', v)
 
+    # Test whether the current token is the given keyword.
     def at_kw(self, v):
         return self.at('kw', v)
 
+    # Consume and return the current token.
     def next(self):
         t = self.toks[self.pos]
         self.pos += 1
         return t
 
+    # Consume a matching token, or return None.
     def eat(self, kind, value=None):
         if self.at(kind, value):
             return self.next()
         return None
 
+    # Consume a required token or raise a located error.
     def expect(self, kind, value=None):
         t = self.toks[self.pos]
         if t[0] != kind or (value is not None and t[1] != value):
@@ -288,11 +303,13 @@ class Parser:
         self.pos += 1
         return t
 
+    # Raise a CompileError at the given or current token.
     def err(self, msg, t=None):
         t = t or self.peek()
         raise CompileError(msg, t[2], t[3], self.fname)
 
     # ---- types ----
+    # Parse a primitive, pointer, array, or named type.
     def parse_type(self):
         if self.at_op('['):
             self.next()
@@ -320,12 +337,14 @@ class Parser:
         return ('named', name)
 
     # ---- top level ----
+    # Parse top-level declarations until end of file.
     def parse_program(self):
         items = []
         while not self.at('eof'):
             items.append(self.parse_item())
         return items
         
+    # Parse a parenthesised function parameter list.
     def parse_params(self):
         self.expect('op', '(')
         params = []
@@ -345,6 +364,7 @@ class Parser:
         return params
         
         
+    # Parse an import, extern, fn, struct, enum, or const declaration.
     def parse_item(self):
         t = self.peek()
         start = (t[2], t[3])
@@ -428,6 +448,7 @@ class Parser:
 
     # ---- statements ----
     
+    # Parse a brace-delimited statement block.
     def parse_block(self, pos=None):
         if pos is None:
             t = self.peek()
@@ -440,6 +461,7 @@ class Parser:
         return Node('block', pos=pos, stmts=stmts)
     
 
+    # Parse one statement, including control flow and assignment.
     def parse_stmt(self):
         t = self.peek()
         start = (t[2], t[3])
@@ -568,15 +590,18 @@ class Parser:
         return Node('exprstmt', pos=start, expr=e)
 
     # ---- expressions ----
+    # Parse a full expression at the lowest precedence level.
     def parse_expr(self):
         return self.parse_bin(0)
 
+    # Parse an expression and require end of input.
     def parse_expr_full(self):
         e = self.parse_expr()
         if not self.at('eof'):
             self.err("trailing tokens in interpolated expression")
         return e
         
+    # Parse binary operators by precedence climbing.
     def parse_bin(self, lvl):
         if lvl >= len(self.BINOPS):
             return self.parse_unary()
@@ -589,6 +614,7 @@ class Parser:
                         op=op, left=left, right=right)
         return left
         
+    # Parse a prefix unary operator or a postfix expression.
     def parse_unary(self):
         if self.at('op') and self.peek()[1] in ('-', '!', '~', '&', '*'):
             op_tok = self.next()
@@ -596,6 +622,7 @@ class Parser:
                         op=op_tok[1], expr=self.parse_unary())
         return self.parse_postfix()
         
+    # Parse call, index, field, and cast suffixes.
     def parse_postfix(self):
         e = self.parse_primary()
         while True:
@@ -643,6 +670,7 @@ class Parser:
     
     
 
+    # Parse literals, names, grouping, alloc, and aggregate literals.
     def parse_primary(self):
         t = self.peek()
         start = (t[2], t[3])
@@ -731,11 +759,13 @@ class Parser:
 class ModuleLoader:
     """Resolves and loads imported modules once, in depth-first order."""
 
+    # Initialise module search paths and import state.
     def __init__(self, search_paths):
         self.search_paths = [Path(p).resolve() for p in search_paths]
         self.visited = set()
         self.loading = set()
 
+    # Resolve a module path against the source and search paths.
     def find(self, rel_path, base_dir):
         candidate = (base_dir / rel_path).resolve()
         if candidate.exists():
@@ -746,6 +776,7 @@ class ModuleLoader:
                 return candidate
         raise CompileError(f"cannot find module '{rel_path}'")
 
+    # Load and parse a module and its imports once, in order.
     def load(self, path, out):
         path = Path(path).resolve()
         if path in self.visited:
@@ -768,6 +799,7 @@ class ModuleLoader:
             self.loading.discard(path)
 
 
+# Return LEPTON_PATH plus the local and std search directories.
 def default_search_paths():
     paths = []
     env = os.environ.get('LEPTON_PATH', '')
@@ -778,6 +810,7 @@ def default_search_paths():
     return paths
 
 
+# Resolve import nodes depth-first into a flat declaration list.
 def flatten_imports(items, fname, search_paths):
     """Resolve `import` nodes depth-first, returning a flat item list."""
     loader = ModuleLoader(search_paths)
@@ -792,6 +825,7 @@ def flatten_imports(items, fname, search_paths):
             flat.append(it)
     return flat
 
+# Compile source text through parsing and verification to IR.
 def compile_to_ir(src, fname, search_paths=None, stats_out=None,
                   strict_types=False, warnings_out=None):
     """Compile source text to a verified IR module.
@@ -814,6 +848,7 @@ def compile_to_ir(src, fname, search_paths=None, stats_out=None,
         stats_out.append(stats)
     return module
 
+# Compile source text front-to-back into C source text.
 def compile_source(src, fname, freestanding=False, search_paths=None,
                    target=None, stats_out=None, strict_types=False,
                    warnings_out=None):
@@ -842,6 +877,7 @@ def compile_source(src, fname, freestanding=False, search_paths=None,
 #     return compile_ir(module, fname, freestanding, target)
 
 
+# Parse command-line arguments and run the compiler driver.
 def main(argv=None):
     ap = argparse.ArgumentParser(
         prog='leptonc', description='Compile Lepton source code.')
