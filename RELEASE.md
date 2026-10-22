@@ -1,6 +1,6 @@
-# Lepton v0.3.0 Release Validation
+# Lepton v0.3.1 Release Validation
 
-Date: 2026-10-21
+Date: 2026-10-22
 
 ## Release contents
 
@@ -56,7 +56,8 @@ a CPU baseline, not a wall-clock S9 measurement.
 
 ## S9 field test
 
-Still required on the Lenovo IdeaPad S9:
+Passed on the Lenovo IdeaPad S9 (user report). The exact baseline numbers
+should still be recorded using [S9_BASELINE.md](S9_BASELINE.md).
 
 1. Build the tagged ISO with `make iso MODEL=models/tinystories.gguf`.
 2. Boot it and confirm the prompt accepts typing. Then run `config`,
@@ -64,8 +65,8 @@ Still required on the Lenovo IdeaPad S9:
 3. Record the S9 `bench` result and whether `poweroff` completes after the
    ACPI `_S5` fix.
 
-The host currently has no physical S9 access, so this remains a release
-checklist item rather than a completed validation.
+The host has no physical S9 access; the field result above is supplied by the
+user. Keep the numeric baseline separate from the functional pass report.
 
 ## Known limitations
 

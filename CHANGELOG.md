@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.3.1 — 2026-10-21
+## v0.3.1 — 2026-10-22
 
 - Fixed REPL backspace echo: `\b` is not a Lepton string escape, so the raw
   backspace character is emitted directly instead of printing `b b`.
