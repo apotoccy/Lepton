@@ -30,6 +30,8 @@ extern fn lp_alloc_init(start: ptr[u8], size: u32) -> void;
 extern fn lp_alloc_bytes(n: i64) -> ptr[u8];
 extern fn lp_reboot() -> void;
 extern fn lp_poweroff() -> void;
+extern fn lp_matvec_q4_0_sse2(base: ptr[u8], x: ptr[f32], y: ptr[f32],
+                              rows: i32, cols: i32) -> void;
 
 
 /* Return true when the string starts with the given prefix. */
@@ -357,32 +359,14 @@ fn copy_f32_tensor(model: ptr[u8], data_start: i64,
 
 
 /* Multiply a Q4_0 matrix by an f32 vector. */
+/* Multiply a Q4_0 matrix by an f32 vector using the SSE2 kernel. */
 fn matvec_q4_0(model: ptr[u8], data_start: i64,
                t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
                rows: i64, cols: i64) -> void {
-    let blocks = cols / 32;
-    let row_bytes = blocks * 18;
     let base = (model + data_start + (t.data_offset as i64)) as ptr[u8];
-    for r in 0..rows {
-        var acc: f32 = 0.0f;
-        let row = base + r * row_bytes;
-        for b in 0..blocks {
-            let block = row + b * 18;
-            let d = read_f16(block, 0);
-            let qs = block + 2;
-            for j in 0..16 {
-                let byte = qs[j];
-                let lo = ((byte & 0x0F as u8) as i32) - 8;
-                let hi = (((byte >> 4 as u8) & 0x0F as u8) as i32) - 8;
-                acc = acc + x[b * 32 + j] * d * (lo as f32);
-                acc = acc + x[b * 32 + j + 16] * d * (hi as f32);
-            }
-        }
-        y[r] = acc;
-    }
+    lp_matvec_q4_0_sse2(base, x, y, rows as i32, cols as i32);
 }
 
-/* Multiply a Q8_0 matrix by an f32 vector. */
 fn matvec_q8_0(model: ptr[u8], data_start: i64,
                t: GGUFTensorInfo, x: ptr[f32], y: ptr[f32],
                rows: i64, cols: i64) -> void {
@@ -1145,6 +1129,169 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
         for j in 0..n_embd {
             lp_dot = lp_dot + logit_r[j] * final_n[j];
         }
+        logits[vv] = lp_dot;
+    }
+    return true;
+}
+
+
+/* Prefill a batch of prompt tokens layer-by-layer, reusing weights. */
+fn prefill_tokens(model: ptr[u8], cfg: ModelConfig,
+                  tokens: ptr[u32], start_pos: i64, count: i64,
+                  wbuf: ptr[f32], kv_k: ptr[f32], kv_v: ptr[f32],
+                  freqs: ptr[f64], logits: ptr[f32]) -> bool {
+    if (count <= 0) { return true; }
+    if (start_pos < 0 || start_pos + count > cfg.max_seq) {
+        println("  inference error: prompt exceeds the context");
+        return false;
+    }
+    let n_embd: i64 = cfg.n_embd;
+    let n_ff: i64 = cfg.n_ff;
+    let n_layer: i64 = cfg.n_layer;
+    let n_head: i64 = cfg.n_head;
+    let n_head_kv: i64 = cfg.n_head_kv;
+    let head_dim: i64 = cfg.head_dim;
+    let kv_dim: i64 = n_head_kv * head_dim;
+    let max_seq: i64 = cfg.max_seq;
+    let stride: i64 = 8 * n_embd + 3 * n_ff;
+    let data_start = model_data_start(model);
+    let tc = read_u64(model, 8);
+    let kc = read_u64(model, 16);
+    let tstart = skip_kv_block(model, 24, kc);
+
+    let act = alloc_or_panic(count * stride * 4) as ptr[f32];
+    let emb_t = tensor_by_name(model, tstart, tc, "token_embd.weight");
+    if (emb_t.dim0 as i64 != n_embd) {
+        println("  inference error: token embedding shape mismatch");
+        return false;
+    }
+    for t in 0..count {
+        let h = act + t * stride;
+        let tok = tokens[start_pos + t] as i64;
+        if (tok < 0 || tok >= (emb_t.dim1 as i64)) {
+            println("  inference error: prompt token out of range");
+            return false;
+        }
+        if (!dequant_row_tensor(model, data_start, emb_t, tok, h)) {
+            return false;
+        }
+    }
+
+    for layer in 0..n_layer {
+        if (generation_cancelled()) { return false; }
+        let an_t = tensor_by_name(model, tstart, tc, "blk.{layer}.attn_norm.weight");
+        let aq_t = tensor_by_name(model, tstart, tc, "blk.{layer}.attn_q.weight");
+        let ak_t = tensor_by_name(model, tstart, tc, "blk.{layer}.attn_k.weight");
+        let av_t = tensor_by_name(model, tstart, tc, "blk.{layer}.attn_v.weight");
+        let ao_t = tensor_by_name(model, tstart, tc, "blk.{layer}.attn_output.weight");
+        let fn_t = tensor_by_name(model, tstart, tc, "blk.{layer}.ffn_norm.weight");
+        let fg_t = tensor_by_name(model, tstart, tc, "blk.{layer}.ffn_gate.weight");
+        let fu_t = tensor_by_name(model, tstart, tc, "blk.{layer}.ffn_up.weight");
+        let fd_t = tensor_by_name(model, tstart, tc, "blk.{layer}.ffn_down.weight");
+
+        /* Normalise and project Q/K/V for every prompt token. */
+        for t in 0..count {
+            let h = act + t * stride;
+            let normed = h + n_embd;
+            let q = h + 2 * n_embd;
+            let k = h + 3 * n_embd;
+            let v = h + 4 * n_embd;
+            copy_f32_tensor(model, data_start, an_t, wbuf);
+            rmsnorm_n(h, wbuf, normed, n_embd, cfg.rms_eps);
+            if (!matvec_tensor(model, data_start, aq_t, normed, q,
+                               n_embd, n_embd)) { return false; }
+            if (!matvec_tensor(model, data_start, ak_t, normed, k,
+                               kv_dim, n_embd)) { return false; }
+            if (!matvec_tensor(model, data_start, av_t, normed, v,
+                               kv_dim, n_embd)) { return false; }
+            let pos = start_pos + t;
+            rope_apply(q, pos, freqs, n_head, head_dim);
+            rope_apply(k, pos, freqs, n_head_kv, head_dim);
+            let cache_base = (layer * max_seq + pos) * kv_dim;
+            for i in 0..kv_dim {
+                kv_k[cache_base + i] = k[i];
+                kv_v[cache_base + i] = v[i];
+            }
+        }
+
+        /* Causal attention and output projection for every prompt token. */
+        let scale: f32 = 1.0f / sqrt(head_dim as f32);
+        let group = n_head / n_head_kv;
+        for t in 0..count {
+            let h = act + t * stride;
+            let q = h + 2 * n_embd;
+            let attended = h + 5 * n_embd;
+            let attn_out = h + 6 * n_embd;
+            let pos = start_pos + t;
+            for hd in 0..n_head {
+                let q_off = hd * head_dim;
+                let kv_h = hd / group;
+                let kv_off = kv_h * head_dim;
+                for p in 0..(pos + 1) {
+                    let kbase = (layer * max_seq + p) * kv_dim + kv_off;
+                    var acc_s: f32 = 0.0f;
+                    for d in 0..head_dim {
+                        acc_s = acc_s + q[q_off + d] * kv_k[kbase + d];
+                    }
+                    logits[p] = acc_s * scale;
+                }
+                softmax_inplace(logits, pos + 1);
+                for d in 0..head_dim {
+                    var acc_v: f32 = 0.0f;
+                    for p in 0..(pos + 1) {
+                        let vbase = (layer * max_seq + p) * kv_dim + kv_off;
+                        acc_v = acc_v + logits[p] * kv_v[vbase + d];
+                    }
+                    attended[q_off + d] = acc_v;
+                }
+            }
+            if (!matvec_tensor(model, data_start, ao_t, attended, attn_out,
+                               n_embd, n_embd)) { return false; }
+            for i in 0..n_embd { h[i] = h[i] + attn_out[i]; }
+        }
+
+        /* Normalise and run the FFN for every prompt token. */
+        for t in 0..count {
+            let h = act + t * stride;
+            let normed = h + n_embd;
+            let gate = h + 7 * n_embd;
+            let up = h + 7 * n_embd + n_ff;
+            let silu_gate = h + 7 * n_embd + 2 * n_ff;
+            let down = h + 7 * n_embd + 3 * n_ff;
+            copy_f32_tensor(model, data_start, fn_t, wbuf);
+            rmsnorm_n(h, wbuf, normed, n_embd, cfg.rms_eps);
+            if (!matvec_tensor(model, data_start, fg_t, normed, gate,
+                               n_ff, n_embd)) { return false; }
+            if (!matvec_tensor(model, data_start, fu_t, normed, up,
+                               n_ff, n_embd)) { return false; }
+            for i in 0..n_ff { silu_gate[i] = silu_f32(gate[i]) * up[i]; }
+            if (!matvec_tensor(model, data_start, fd_t, silu_gate, down,
+                               n_embd, n_ff)) { return false; }
+            for i in 0..n_embd { h[i] = h[i] + down[i]; }
+        }
+    }
+
+    let last = act + (count - 1) * stride;
+    let onf_t = tensor_by_name(model, tstart, tc, "output_norm.weight");
+    copy_f32_tensor(model, data_start, onf_t, wbuf);
+    rmsnorm_n(last, wbuf, last + n_embd, n_embd, cfg.rms_eps);
+    var ow_t = tensor_by_name(model, tstart, tc, "output.weight");
+    if (ow_t.name_len == 0 as u64) { ow_t = emb_t; }
+    if (ow_t.dim0 as i64 != n_embd) {
+        println("  inference error: output projection width mismatch");
+        return false;
+    }
+    let v_size = ow_t.dim1 as i64;
+    if (v_size > cfg.vocab_size) {
+        println("  inference error: output vocabulary exceeds configured size");
+        return false;
+    }
+    for vv in 0..v_size {
+        if (!dequant_row_tensor(model, data_start, ow_t, vv, wbuf)) {
+            return false;
+        }
+        var lp_dot: f32 = 0.0f;
+        for j in 0..n_embd { lp_dot = lp_dot + wbuf[j] * (last + n_embd)[j]; }
         logits[vv] = lp_dot;
     }
     return true;
@@ -2835,21 +2982,16 @@ fn main() {
                                    active_cfg.n_head_kv * active_cfg.head_dim);
                                 lp_rand_seed(ticks() + 1 as u32);
 
-                                /* Run forward on prompt tokens */
+                                /* Run batched prompt prefill */
                                 var gp_ok: i32 = 1;
                                 var gp_pos: i64 = 0;
-                                while (gp_pos < gp_len) {
-                                    if (!forward_token_at_pos(gp_m, gp_cfg,
-                                                              gp_ids[gp_pos] as i64,
-                                                              gp_pos,
-                                                              gp_w, gp_a,
-                                                              kv_k_buf, kv_v_buf,
-                                                              rope_freqs,
-                                                              logits_buf)) {
-                                        gp_ok = 0;
-                                        break;
-                                    }
-                                    gp_pos = gp_pos + 1;
+                                if (!prefill_tokens(gp_m, gp_cfg, gp_ids,
+                                                    0 as i64, gp_len,
+                                                    gp_w, kv_k_buf, kv_v_buf,
+                                                    rope_freqs, logits_buf)) {
+                                    gp_ok = 0;
+                                } else {
+                                    gp_pos = gp_len;
                                 }
 
                                 /* Generate */
@@ -3011,24 +3153,16 @@ fn main() {
                                     let qt0 = ticks();
                                     var q_ok: i32 = 1;
                                     var q_pos: i64 = q_start;
-                                    while (q_pos < qp) {
-                                        if (generation_cancelled()) {
-                                            q_ok = 0;
-                                            break;
-                                        }
-                                        if (!forward_token_at_pos(q_m, q_cfg,
-                                                                  q_ids[q_pos] as i64,
-                                                                  q_pos,
-                                                                  scratch_bytes as ptr[f32],
-                                                                  activation_buf,
-                                                                  kv_k_buf, kv_v_buf,
-                                                                  rope_freqs, logits_buf)) {
-                                            q_ok = 0;
-                                            break;
-                                        }
-                                        q_pos = q_pos + 1;
-                                        if ((q_pos & 3) == 0) { print("."); }
+                                    if (!prefill_tokens(q_m, q_cfg, q_ids,
+                                                        q_start, qp - q_start,
+                                                        scratch_bytes as ptr[f32],
+                                                        kv_k_buf, kv_v_buf,
+                                                        rope_freqs, logits_buf)) {
+                                        q_ok = 0;
+                                    } else {
+                                        q_pos = qp;
                                     }
+                                    print(".");
                                     let qt1 = ticks();
                                     println("");
                                     println("  prefill: {(qt1 - qt0) as i64 * 10} ms");

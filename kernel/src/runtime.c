@@ -1,6 +1,8 @@
 /* Lepton kernel runtime: satisfies every lp_* symbol the compiler emits
    in --freestanding mode, and provides memset/memcpy for GCC. */
 
+#include <emmintrin.h>
+
 extern void vga_putc(char c);
 extern void vga_clear(void);
 extern void vga_cursor_left(void);
@@ -44,6 +46,84 @@ static int serial_ready(void) { return inb(COM1 + 5) & 0x20; }
 static void serial_putc(char c) {
     while (!serial_ready()) { }
     outb(COM1, (uint8_t)c);
+}
+
+
+/* ---- SSE2 quantized matvec -------------------------------------------- */
+static float lp_half_to_f32(uint16_t h) {
+    uint32_t sign = ((uint32_t)(h & 0x8000u)) << 16;
+    uint32_t exp = (h >> 10) & 0x1Fu;
+    uint32_t mant = h & 0x3FFu;
+    uint32_t bits;
+    if (exp == 0) {
+        if (mant == 0) {
+            bits = sign;
+        } else {
+            int e = -1;
+            do {
+                e++;
+                mant <<= 1;
+            } while ((mant & 0x400u) == 0);
+            mant &= 0x3FFu;
+            bits = sign | ((uint32_t)(127 - 15 - e) << 23) | (mant << 13);
+        }
+    } else if (exp == 31) {
+        bits = sign | 0x7F800000u | (mant << 13);
+    } else {
+        bits = sign | ((exp + 112u) << 23) | (mant << 13);
+    }
+    union { uint32_t u; float f; } v;
+    v.u = bits;
+    return v.f;
+}
+
+void lp_matvec_q4_0_sse2(const unsigned char *base, const float *x,
+                         float *y, int rows, int cols) {
+    const int blocks = cols / 32;
+    const int row_bytes = blocks * 18;
+    const __m128i mask = _mm_set1_epi8(0x0F);
+    const __m128i zero = _mm_setzero_si128();
+    const __m128i eight = _mm_set1_epi32(8);
+    for (int r = 0; r < rows; r++) {
+        const unsigned char *row = base + (size_t)r * (size_t)row_bytes;
+        __m128 acc0 = _mm_setzero_ps();
+        __m128 acc1 = _mm_setzero_ps();
+        __m128 acc2 = _mm_setzero_ps();
+        __m128 acc3 = _mm_setzero_ps();
+        for (int b = 0; b < blocks; b++) {
+            const unsigned char *blk = row + b * 18;
+            uint16_t h = (uint16_t)blk[0] | ((uint16_t)blk[1] << 8);
+            __m128 d = _mm_set1_ps(lp_half_to_f32(h));
+            __m128i bytes = _mm_loadu_si128((const __m128i *)(blk + 2));
+            __m128i lo = _mm_and_si128(bytes, mask);
+            __m128i hi = _mm_and_si128(_mm_srli_epi16(bytes, 4), mask);
+            __m128i lo16a = _mm_unpacklo_epi8(lo, zero);
+            __m128i lo16b = _mm_unpackhi_epi8(lo, zero);
+            __m128i hi16a = _mm_unpacklo_epi8(hi, zero);
+            __m128i hi16b = _mm_unpackhi_epi8(hi, zero);
+            __m128i q0 = _mm_sub_epi32(_mm_unpacklo_epi16(lo16a, zero), eight);
+            __m128i q1 = _mm_sub_epi32(_mm_unpackhi_epi16(lo16a, zero), eight);
+            __m128i q2 = _mm_sub_epi32(_mm_unpacklo_epi16(lo16b, zero), eight);
+            __m128i q3 = _mm_sub_epi32(_mm_unpackhi_epi16(lo16b, zero), eight);
+            __m128i q4 = _mm_sub_epi32(_mm_unpacklo_epi16(hi16a, zero), eight);
+            __m128i q5 = _mm_sub_epi32(_mm_unpackhi_epi16(hi16a, zero), eight);
+            __m128i q6 = _mm_sub_epi32(_mm_unpacklo_epi16(hi16b, zero), eight);
+            __m128i q7 = _mm_sub_epi32(_mm_unpackhi_epi16(hi16b, zero), eight);
+            const float *xb = x + b * 32;
+            acc0 = _mm_add_ps(acc0, _mm_mul_ps(_mm_mul_ps(_mm_cvtepi32_ps(q0), d), _mm_loadu_ps(xb + 0)));
+            acc1 = _mm_add_ps(acc1, _mm_mul_ps(_mm_mul_ps(_mm_cvtepi32_ps(q1), d), _mm_loadu_ps(xb + 4)));
+            acc2 = _mm_add_ps(acc2, _mm_mul_ps(_mm_mul_ps(_mm_cvtepi32_ps(q2), d), _mm_loadu_ps(xb + 8)));
+            acc3 = _mm_add_ps(acc3, _mm_mul_ps(_mm_mul_ps(_mm_cvtepi32_ps(q3), d), _mm_loadu_ps(xb + 12)));
+            acc0 = _mm_add_ps(acc0, _mm_mul_ps(_mm_mul_ps(_mm_cvtepi32_ps(q4), d), _mm_loadu_ps(xb + 16)));
+            acc1 = _mm_add_ps(acc1, _mm_mul_ps(_mm_mul_ps(_mm_cvtepi32_ps(q5), d), _mm_loadu_ps(xb + 20)));
+            acc2 = _mm_add_ps(acc2, _mm_mul_ps(_mm_mul_ps(_mm_cvtepi32_ps(q6), d), _mm_loadu_ps(xb + 24)));
+            acc3 = _mm_add_ps(acc3, _mm_mul_ps(_mm_mul_ps(_mm_cvtepi32_ps(q7), d), _mm_loadu_ps(xb + 28)));
+        }
+        __m128 total = _mm_add_ps(_mm_add_ps(acc0, acc1), _mm_add_ps(acc2, acc3));
+        float t[4];
+        _mm_storeu_ps(t, total);
+        y[r] = t[0] + t[1] + t[2] + t[3];
+    }
 }
 
 /* ---------- compiler runtime ---------- */

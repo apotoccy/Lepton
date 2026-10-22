@@ -229,9 +229,9 @@ First question:
 ```text
   prefix built; prefilling 37 tokens (Ctrl+C cancels)...
   .........
-  prefill: 86850 ms
+  prefill: 58100 ms
   2 + 2 =
-  answer: 11950 ms for 6 token(s)
+  answer: 10640 ms for 6 token(s)
 ```
 
 Second question:
@@ -239,12 +239,13 @@ Second question:
 ```text
   prefix cached; prefilling 13 tokens (Ctrl+C cancels)...
   ...
-  prefill: 31670 ms
+  prefill: 21250 ms
   3 + 3 =
-  answer: 12070 ms for 6 token(s)
+  answer: 10720 ms for 6 token(s)
 ```
 
-The fixed system/user ChatML prefix is cached after the first ask. Repeated
+The fixed system/user ChatML prefix is cached after the first ask. Prompt
+prefill is now layer-major/batched, and Q4_0 matvec uses SSE2. Repeated
 questions prefill only the question and assistant header. The cache is
 invalidated by `generate`, `genprompt`, `fwdpos`, `bench`, `gqapair`,
 `selftest`, `reset`, and other KV-clearing commands. On the S9 the first ask

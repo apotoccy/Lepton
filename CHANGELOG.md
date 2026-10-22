@@ -32,6 +32,9 @@
   `selftest`, and `mem`.
 - Direct Q4_0/Q8_0 matvecs; QEMU baseline improved from ~299.4 to
   ~272.5 ms/token.
+- Q4_0 SSE2 matvec and layer-major batched prompt prefill. TinyStories
+  `bench 8` is ~252.5 ms/token; SmolLM `bench 1` is ~2080 ms/token.
+- Ask prefill fell to ~58 s first / ~21 s cached in QEMU.
 - Q4_K/Q5_K/Q6_K dequantization/matvec, F16/F32 fallbacks, tensor
   shape/type checks, and K-quant fixtures validated against independent
   references.

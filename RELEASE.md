@@ -78,9 +78,9 @@ checklist item rather than a completed validation.
   (`2 + 2 = 4.`); Q5_0/Q5_1 support is implemented and fixture-validated,
   but Q4_K_M still produced incorrect text.
   `selftest` remains base-profile-specific; use `ask` for Instruct.
-  QEMU ask baseline: ~87 s for the first 37-token ChatML prefill and ~32 s
-  for later questions after the prefix cache. Use `keytest` to separate
-  keyboard failure from prefill waiting.
+  QEMU ask baseline after batched prefill/SSE2: ~58 s for the first 37-token
+  ChatML prefill and ~21 s for later questions after the prefix cache. Use
+  `keytest` and `S9_BASELINE.md`.
 - One S9 report showed a black screen with the REPL build; the boot path is
   being triaged separately from the keyboard fix.
 - `poweroff` now uses the DSDT `_S5` sleep types and the FADT SMI/PM1 fields;

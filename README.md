@@ -447,8 +447,9 @@ These are the boundaries of the current implementation, not a wish list; see
   `<|im_end|>`) and requires an Instruct GGUF. Prefill is ~37 tokens and
   prints progress; Ctrl+C cancels. Ordinary REPL typing is unaffected once
   `ask` returns. The system/user ChatML prefix is cached after the first ask:
-  QEMU baseline was ~87 s for the first prefill and ~32 s for later questions.
-  The cache is invalidated by KV-clearing commands. The tested file is
+  QEMU baseline after batched prefill/SSE2 was ~58 s for the first prefill and
+  ~21 s for later questions. The cache is invalidated by KV-clearing commands.
+  See [S9_BASELINE.md](S9_BASELINE.md) for the clean S9 measurement sequence. The tested file is
   `models/smollm2-instruct-q4_0.gguf` (Q4_0); the Q4_K_S/Q4_K_M variants
   contain Q5_0 tensors and are not supported yet. The base `smallm.gguf`
   remains for completion tests only.
