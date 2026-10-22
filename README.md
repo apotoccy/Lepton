@@ -103,7 +103,8 @@ as a GRUB ISO.
   interrupts, PS/2 controller initialization (scancode set 1), IRQ1 plus a
   polling fallback, and a line-edited REPL with colored prompts, eight-entry
   history, cursor editing, tab completion, help topics, `stop` sequences,
-  Ctrl+C cancellation, `ask` ChatML questions, `selftest`, `mem`, `clear`,
+  Ctrl+C cancellation, `ask` ChatML questions with timing/progress, `keytest`,
+  `selftest`, `mem`, `clear`,
   `reset`, `reboot`, `poweroff`, Ctrl+Alt+Del, and ACPI shutdown. Expected
   inference/configuration errors return to the prompt; fatal panics print a
   reboot hint.
@@ -445,7 +446,8 @@ These are the boundaries of the current implementation, not a wish list; see
 - **Q&A.** `ask` uses SmolLM2 Instruct ChatML (`<|im_start|>` /
   `<|im_end|>`) and requires an Instruct GGUF. Prefill is ~37 tokens and
   prints progress; Ctrl+C cancels. Ordinary REPL typing is unaffected once
-  `ask` returns. The tested file is
+  `ask` returns. Measured QEMU baseline: ~90 s prefill, ~17 s for an 8-token
+  answer. The tested file is
   `models/smollm2-instruct-q4_0.gguf` (Q4_0); the Q4_K_S/Q4_K_M variants
   contain Q5_0 tensors and are not supported yet. The base `smallm.gguf`
   remains for completion tests only.

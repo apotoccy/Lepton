@@ -212,12 +212,18 @@ make iso MODEL=models/smollm2-instruct-q4_0.gguf
 ask "What is 2+2?" 8
 ```
 
-Observed:
+Observed on QEMU:
 
 ```text
-  asking (37 prompt tokens)...
+  prefilling 37 tokens (Ctrl+C cancels)...
+  .........
+  prefill: 89920 ms
   2 + 2 = 4.
+  answer: 17150 ms for 8 token(s)
 ```
+
+The prefill dominates. On the S9 this can be many minutes; use Ctrl+C and
+`keytest` to distinguish input failure from prefill waiting.
 
 The Q4_K_S/Q4_K_M variants from that repository mix in Q5_0 tensors, which
 the kernel does not support yet. Use Q4_0 for now.

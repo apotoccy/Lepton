@@ -1857,7 +1857,7 @@ fn main() {
     println("[7] Enabling interrupts");
     interrupts_init();
     println("    timer at 100 Hz, keyboard ready");
-    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, ask [n], stop, mem, selftest, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
+    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, ask [n], keytest, stop, mem, selftest, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
     println("");
 
     var line_buf = alloc([u8; 128]) as ptr[u8];
@@ -2666,6 +2666,20 @@ fn main() {
                                 }
                             }
                         }
+                } else if (starts_with(text, "keytest")) {
+                    println("  press keys for 5 seconds...");
+                    let kt0 = ticks();
+                    var kcount: i64 = 0;
+                    while ((ticks() - kt0) < 500 as u32) {
+                        kbd_poll();
+                        let kev = kbd_read();
+                        if (kev != 0) {
+                            println("  event {kev}");
+                            kcount = kcount + 1;
+                        }
+                        cpu_hlt();
+                    }
+                    println("  keytest: {kcount} event(s)");
                 } else if (starts_with(text, "ask")) {
                     if (mb_module_count() == 0 as u32) {
                         println("  no module loaded");
@@ -2755,6 +2769,7 @@ fn main() {
                                                    active_cfg.n_head_kv * active_cfg.head_dim);
                                     println("  prefilling {qp} tokens (Ctrl+C cancels)...");
                                     print("  ");
+                                    let qt0 = ticks();
                                     var q_ok: i32 = 1;
                                     var q_pos: i64 = 0;
                                     while (q_pos < qp) {
@@ -2775,9 +2790,12 @@ fn main() {
                                         q_pos = q_pos + 1;
                                         if ((q_pos & 3) == 0) { print("."); }
                                     }
+                                    let qt1 = ticks();
                                     println("");
+                                    println("  prefill: {(qt1 - qt0) as i64 * 10} ms");
                                     if (q_ok == 1) {
                                         let q_eos = model_eos(q_m);
+                                        let qt2 = ticks();
                                         print("  ");
                                         var q_g: i64 = 0;
                                         while (q_g < q_n && q_pos < q_cfg.max_seq) {
@@ -2803,7 +2821,11 @@ fn main() {
                                             }
                                             q_pos = q_pos + 1;
                                         }
+                                        let qt3 = ticks();
                                         println("");
+                                        println("  answer: {(qt3 - qt2) as i64 * 10} ms for {q_g} token(s)");
+                                    } else {
+                                        println("  ask cancelled");
                                     }
                                 }
                             }
@@ -2932,6 +2954,8 @@ fn main() {
                         println("    genprompt \"text\" [temp] [top_k] [n] - prefill and continue");
                     } else if (starts_with(topic, "bench")) {
                         println("    bench [n] - sequential forward timing");
+                    } else if (starts_with(topic, "keytest")) {
+                        println("    keytest - print keyboard events for five seconds");
                     } else if (starts_with(topic, "ask")) {
                         println("    ask \"question\" [n] - ChatML question for SmolLM2 Instruct");
                     } else if (starts_with(topic, "stop")) {
@@ -2948,7 +2972,7 @@ fn main() {
                         println("    no help for that topic");
                     }
                 } else if (starts_with(text, "help")) {
-                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, ask [n], stop, mem, selftest, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
+                    println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, ask [n], keytest, stop, mem, selftest, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
                 } else if (line_len > 0) {
                     println("  {text}");
                 }
