@@ -446,8 +446,9 @@ These are the boundaries of the current implementation, not a wish list; see
 - **Q&A.** `ask` uses SmolLM2 Instruct ChatML (`<|im_start|>` /
   `<|im_end|>`) and requires an Instruct GGUF. Prefill is ~37 tokens and
   prints progress; Ctrl+C cancels. Ordinary REPL typing is unaffected once
-  `ask` returns. Measured QEMU baseline: ~90 s prefill, ~17 s for an 8-token
-  answer. The tested file is
+  `ask` returns. The system/user ChatML prefix is cached after the first ask:
+  QEMU baseline was ~87 s for the first prefill and ~32 s for later questions.
+  The cache is invalidated by KV-clearing commands. The tested file is
   `models/smollm2-instruct-q4_0.gguf` (Q4_0); the Q4_K_S/Q4_K_M variants
   contain Q5_0 tensors and are not supported yet. The base `smallm.gguf`
   remains for completion tests only.

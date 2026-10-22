@@ -270,6 +270,7 @@ tensors, not the 15M model label.
 - [x] Parse model-specific RoPE frequency base and validate SmolLM in `selftest`
 - [x] Add SmolLM2 ChatML `ask` path and validate it with Instruct Q4_0
 - [x] Add ask prefill/answer timing and a raw keyboard event diagnostic
+- [x] Cache the fixed ChatML system/user prefix across asks
 - [ ] Add Q5_0/Q5_1 support for Q4_K_S/Q4_K_M mixed quantizations
 - [x] Add Q4_K dequantization and direct matvec, plus F16/F32 fallbacks
 - [x] Add Q5_K/Q6_K dequantization and direct matvecs

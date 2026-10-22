@@ -1869,6 +1869,8 @@ fn main() {
     var history_pos: i64 = 0;
     let stop_buf = alloc([u8; 64]) as ptr[u8];
     var stop_len: i64 = 0;
+    var ask_prefix_valid: i32 = 0;
+    var ask_prefix_len: i64 = 0;
 
     vga_set_color(0x0A as u8);
     print("lepton> ");
@@ -2251,6 +2253,7 @@ fn main() {
                         let fwd_cfg = model_config(fwd_model);
                         let fwd_buf = scratch_bytes as ptr[f32];
                         println("  running forward for token <s> (id 1)...");
+                        ask_prefix_valid = 0;
                         clear_kv_cache(kv_k_buf, kv_v_buf,
                                        active_cfg.n_layer,
                                        active_cfg.max_seq,
@@ -2332,6 +2335,7 @@ fn main() {
                         var bn_n: i64 = 8;
                         if (bn_n_arg > 0) { bn_n = bn_n_arg; }
                         if (bn_n > bn_cfg.max_seq) { bn_n = bn_cfg.max_seq; }
+                        ask_prefix_valid = 0;
                         clear_kv_cache(kv_k_buf, kv_v_buf,
                                        active_cfg.n_layer,
                                        active_cfg.max_seq,
@@ -2366,6 +2370,7 @@ fn main() {
                     } else {
                         let gp_m = mb_module_start(0 as u32) as ptr[u8];
                         let gp_cfg = model_config(gp_m);
+                        ask_prefix_valid = 0;
                         clear_kv_cache(kv_k_buf, kv_v_buf,
                                        active_cfg.n_layer,
                                        active_cfg.max_seq,
@@ -2402,6 +2407,7 @@ fn main() {
                         let fp_cfg = model_config(fp_m);
                         let fp_w = scratch_bytes as ptr[f32];
                         let fp_a = activation_buf as ptr[f32];
+                        ask_prefix_valid = 0;
                         clear_kv_cache(kv_k_buf, kv_v_buf,
                                        active_cfg.n_layer,
                                        active_cfg.max_seq,
@@ -2455,6 +2461,7 @@ fn main() {
 
                         let gen_w = scratch_bytes as ptr[f32];
                         let gen_a = activation_buf as ptr[f32];
+                        ask_prefix_valid = 0;
                         clear_kv_cache(kv_k_buf, kv_v_buf,
                                    active_cfg.n_layer, active_cfg.max_seq,
                                    active_cfg.n_head_kv * active_cfg.head_dim);
@@ -2602,6 +2609,7 @@ fn main() {
                                 println("");
 
                                 /* Clear KV */
+                                ask_prefix_valid = 0;
                                 clear_kv_cache(kv_k_buf, kv_v_buf,
                                    active_cfg.n_layer, active_cfg.max_seq,
                                    active_cfg.n_head_kv * active_cfg.head_dim);
@@ -2740,6 +2748,7 @@ fn main() {
                                                     merge_table, merge_count,
                                                     q_seg, 0 as i64, ul,
                                                     q_ids, qp, 512);
+                                let q_prefix_len = qp;
                                 var qi: i64 = 0;
                                 while (q_buf[qi] != 0 as u8) { qi = qi + 1; }
                                 qp = append_encoded(q_m, tok_table, tok_count,
@@ -2764,14 +2773,24 @@ fn main() {
                                     println("  inference error: ChatML prompt fills the context");
                                 } else {
                                     if (q_n > remaining) { q_n = remaining; }
-                                    clear_kv_cache(kv_k_buf, kv_v_buf,
-                                                   active_cfg.n_layer, active_cfg.max_seq,
-                                                   active_cfg.n_head_kv * active_cfg.head_dim);
-                                    println("  prefilling {qp} tokens (Ctrl+C cancels)...");
+                                    var q_reuse = ask_prefix_valid == 1
+                                               && ask_prefix_len == q_prefix_len;
+                                    if (!q_reuse) {
+                                        clear_kv_cache(kv_k_buf, kv_v_buf,
+                                                       active_cfg.n_layer,
+                                                       active_cfg.max_seq,
+                                                       active_cfg.n_head_kv * active_cfg.head_dim);
+                                        ask_prefix_valid = 0;
+                                    }
+                                    var q_start: i64 = 0;
+                                    if (q_reuse) { q_start = ask_prefix_len; }
+                                    if (q_reuse) { print("  prefix cached; "); }
+                                    else { print("  prefix built; "); }
+                                    println("prefilling {qp - q_start} tokens (Ctrl+C cancels)...");
                                     print("  ");
                                     let qt0 = ticks();
                                     var q_ok: i32 = 1;
-                                    var q_pos: i64 = 0;
+                                    var q_pos: i64 = q_start;
                                     while (q_pos < qp) {
                                         if (generation_cancelled()) {
                                             q_ok = 0;
@@ -2793,6 +2812,10 @@ fn main() {
                                     let qt1 = ticks();
                                     println("");
                                     println("  prefill: {(qt1 - qt0) as i64 * 10} ms");
+                                    if (q_ok == 1 && !q_reuse) {
+                                        ask_prefix_valid = 1;
+                                        ask_prefix_len = q_prefix_len;
+                                    }
                                     if (q_ok == 1) {
                                         let q_eos = model_eos(q_m);
                                         let qt2 = ticks();
@@ -2851,6 +2874,7 @@ fn main() {
                     } else {
                         let tm = mb_module_start(0 as u32) as ptr[u8];
                         let tc2 = model_config(tm);
+                        ask_prefix_valid = 0;
                         let tw = scratch_bytes as ptr[f32];
                         let ta = activation_buf as ptr[f32];
                         if (tc2.n_embd == 288 as i64 && tc2.n_layer == 6 as i64) {
@@ -2930,6 +2954,7 @@ fn main() {
                         }
                     }
                 } else if (starts_with(text, "reset") && (text[5] == '\0' || text[5] == ' ')) {
+                    ask_prefix_valid = 0;
                     clear_kv_cache(kv_k_buf, kv_v_buf,
                                    active_cfg.n_layer, active_cfg.max_seq,
                                    active_cfg.n_head_kv * active_cfg.head_dim);
