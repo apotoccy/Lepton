@@ -274,6 +274,7 @@ tensors, not the 15M model label.
 - [x] Layer-major batched prompt prefill
 - [x] SSE2 Q4_0 matvec
 - [x] Multi-turn `chat` mode with conversation KV state
+- [x] Eight-page VGA scrollback with PageUp/PageDown
 - [x] Add Q5_0/Q5_1 block support and fixtures
 - [ ] Investigate incorrect Q4_K_M output despite Q5_0/Q5_1 support
 - [x] Add Q4_K dequantization and direct matvec, plus F16/F32 fallbacks

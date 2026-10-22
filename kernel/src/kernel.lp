@@ -18,6 +18,8 @@ extern fn lp_clear_screen() -> void;
 extern fn lp_heap_used() -> i64;
 extern fn lp_heap_max() -> i64;
 extern fn vga_set_color(c: u8) -> void;
+extern fn vga_page_up() -> void;
+extern fn vga_page_down() -> void;
 extern fn mb_module_count() -> u32;
 extern fn mb_module_start(idx: u32) -> u32;
 extern fn mb_module_size(idx: u32) -> u32;
@@ -2248,6 +2250,14 @@ fn main() {
         let ev = kbd_read();
         if (ev == 0) { continue; }
 
+        if (ev == 0x10A) {          /* PageUp */
+            vga_page_up();
+            continue;
+        }
+        if (ev == 0x10B) {          /* PageDown */
+            vga_page_down();
+            continue;
+        }
         if (ev == 0x100) {          /* Up */
             if (history_n > 0 && history_pos > 0) {
                 let old_len = line_len;
@@ -3563,6 +3573,10 @@ fn main() {
                 if (chat_mode == 1) { print("you> "); }
                 else { print("lepton> "); }
                 vga_set_color(0x0F as u8);
+            } else if (ch == 16 as u8) {      /* serial Ctrl+P: page up */
+                vga_page_up();
+            } else if (ch == 14 as u8) {      /* serial Ctrl+N: page down */
+                vga_page_down();
             } else if (ch == 12 as u8) {      /* serial Ctrl+L */
                 lp_clear_screen();
                 line_redraw(line_buf, line_len, cursor, line_len, chat_mode);

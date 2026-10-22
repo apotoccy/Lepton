@@ -120,6 +120,8 @@ cursor editing, eight-entry history, tab completion, and Ctrl+C/Ctrl+L.
   turn appends user/assistant tokens to the KV cache, `ctx N/256` reports
   usage, `/exit` leaves, and Ctrl+C cancels. The raw `lepton>` REPL remains
   available outside chat.
+- **PageUp/PageDown** or **Ctrl+P/Ctrl+N** — review the last eight VGA pages;
+  any normal key returns to the live screen.
 - `keytest` — print raw keyboard events for five seconds.
 - `stop "<text>"` — set a stop sequence for generation; `stop` clears it.
 - `selftest` — deterministic TinyStories forward check.

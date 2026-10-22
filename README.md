@@ -447,7 +447,8 @@ These are the boundaries of the current implementation, not a wish list; see
   `<|im_end|>`) and requires an Instruct GGUF. Prefill is ~37 tokens and
   prints progress; Ctrl+C cancels. Ordinary REPL typing is unaffected once
   `ask` returns. `chat` starts a multi-turn ChatML mode with `/exit` and
-  Ctrl+C cancellation; it keeps conversation KV state. The system/user ChatML
+  Ctrl+C cancellation; it keeps conversation KV state. PageUp/PageDown or
+  Ctrl+P/Ctrl+N review up to eight previous VGA pages. The system/user ChatML
   prefix is cached after the first ask:
   QEMU baseline after batched prefill/SSE2 was ~58 s for the first prefill and
   ~21 s for later questions. The cache is invalidated by KV-clearing commands.

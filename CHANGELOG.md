@@ -6,6 +6,8 @@
   conversation KV state, `ctx` status, `/exit`, and Ctrl+C cancellation.
 - Added chat-aware prompts and line redraws (`you>`) while preserving the
   raw `lepton>` REPL.
+- Added an eight-page VGA scrollback ring with PageUp/PageDown and
+  Ctrl+P/Ctrl+N; typing returns to the live screen.
 
 ## v0.3.1 — 2026-10-22
 

@@ -214,6 +214,8 @@ static const char kbd_shift[128] = {
 #define KBD_TAB     0x107u
 #define KBD_CTRL_C  0x108u
 #define KBD_CTRL_L  0x109u
+#define KBD_PGUP    0x10Au
+#define KBD_PGDN    0x10Bu
 
 static u32 kbd_buf[KBD_BUF_SIZE];
 static volatile u16 kbd_head = 0;
@@ -246,6 +248,8 @@ static void kbd_handle(u8 sc) {
         else if (sc == 0x47) { kbd_push(KBD_HOME); }
         else if (sc == 0x4F) { kbd_push(KBD_END); }
         else if (sc == 0x53) { kbd_push(KBD_DELETE); }
+        else if (sc == 0x49) { kbd_push(KBD_PGUP); }
+        else if (sc == 0x51) { kbd_push(KBD_PGDN); }
         return;
     }
     if (sc == 0x2A || sc == 0x36) { shift_down = 1; return; }
@@ -257,6 +261,8 @@ static void kbd_handle(u8 sc) {
     if (sc == 0x53 && ctrl_down && alt_down) { lp_reboot(); }
     if (ctrl_down && sc == 0x2E) { kbd_push(KBD_CTRL_C); return; }
     if (ctrl_down && sc == 0x26) { kbd_push(KBD_CTRL_L); return; }
+    if (ctrl_down && sc == 0x19) { kbd_push(KBD_PGUP); return; }
+    if (ctrl_down && sc == 0x31) { kbd_push(KBD_PGDN); return; }
     if (sc == 0x0F) { kbd_push(KBD_TAB); return; }
     if (sc & 0x80) return;
     char c = shift_down ? kbd_shift[sc] : kbd_normal[sc];
