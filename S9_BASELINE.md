@@ -34,19 +34,19 @@ The first ask builds the cached ChatML prefix. The second ask reuses it.
 
 Record:
 
-| Measurement | S9 result |
-|---|---|
-| `config` model | Qwen/SmolLM values |
-| Heap used / limit | |
-| `keytest` events | |
-| `bench 8` ms/token | |
-| `selftest` | |
-| First ask prefill ms | |
-| First ask answer ms | |
-| Second ask prefill ms | |
-| Second ask answer ms | |
-| `2+2` answer correct | |
-| `3+3` answer correct | |
+| Measurement               | S9 result                            |
+|---------------------------|--------------------------------------|
+| `config` model            | SmolLM                               |
+| `mem` Heap used / limit   | 16036176 / 67108864 bytes            |
+| `keytest` events          | a - 97, f - 102, k - 107             |
+| `bench 8` ms/token        | 7270 ms (908.75 ms/token)            |
+| `selftest`                | skipped (unrecognized model profile) |
+| First ask prefill ms      |                                      |
+| First ask answer ms       |                                      |
+| Second ask prefill ms     |                                      |
+| Second ask answer ms      |                                      |
+| `2+2` answer correct      |                                      |
+| `3+3` answer correct      |                                      |
 
 ## QEMU reference after SSE2 + batched prefill
 
