@@ -23,6 +23,9 @@ kernel/arch/uefi64/        UEFI64 port (next phase)
 | `make run-uefi64-shell` | Shell milestone | Boots the platform shell under OVMF |
 | `make uefi64-kernel` | Inference milestone | 64-bit Lepton core + embedded Q4_0 model |
 | `make run-uefi64-kernel` | Inference milestone | Boots the 64-bit kernel under OVMF |
+| `make iso-hybrid` | Release image | BIOS32 + UEFI64 hybrid ISO |
+| `make run-iso-hybrid` | Release image | Boots the BIOS hybrid under QEMU |
+| `make run-iso-hybrid-uefi` | Release image | Boots the UEFI hybrid under OVMF |
 | `make iso` | Stable | BIOS GRUB ISO |
 
 `kernel64-check` is not a bootable UEFI kernel yet. It currently exposes
@@ -44,6 +47,18 @@ The model path is `\models\smollm2-instruct-q4_0.gguf`; the FAT image is
 built by `run-uefi64-kernel`. Loading a model no longer requires rebuilding
 the EFI binary.
 
+## Hybrid ISO
+
+`make iso-hybrid` creates `build/kernel/lepton-hybrid.iso` with two El Torito
+entries:
+
+- BIOS32 GRUB standalone -> `/boot/lepton32.elf` + `/models/...gguf`;
+- UEFI64 FAT ESP -> `/EFI/BOOT/BOOTX64.EFI` + `/models/...gguf`.
+
+The model is present in both the ISO9660 tree and the FAT ESP because the
+BIOS module and UEFI file APIs read different filesystems. The image is about
+276 MB.
+
 ## Platform contract
 
 The shared core calls only these platform entry points:
@@ -57,12 +72,8 @@ The shared core calls only these platform entry points:
 `kernel/arch/bios32/platform.c` maps them to the existing VGA, PS/2, PIT,
 Multiboot, and ACPI implementations.
 
-## Planned hybrid ISO
+## Design constraint
 
-```text
-/boot/lepton32.elf          BIOS32 kernel
-/EFI/BOOT/BOOTX64.EFI      UEFI64 kernel
-/models/...gguf             shared model
-```
-
-The model and inference code are shared; the boot binaries are not.
+The model and inference code are shared; the boot binaries are not. The
+hybrid ISO carries the model twice because BIOS Multiboot and the UEFI file
+protocol read different filesystems.

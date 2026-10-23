@@ -14,6 +14,8 @@
 - Linked the shared Lepton kernel core as a 64-bit UEFI application.
 - Load a Q4_0 GGUF from the EFI System Partition instead of embedding it.
   OVMF with SmolLM2-135M-Instruct Q4_0 returns `fwdpos 0 1` = 28 (`,`).
+- Build a hybrid ISO with a BIOS32 GRUB/El Torito entry and a direct UEFI64
+  FAT ESP entry. Both boot the SmolLM2 model.
 
 ## v0.4.0 — 2026-10-23
 

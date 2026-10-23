@@ -60,6 +60,8 @@ KERNEL_C      := $(KERNEL_OUT)/kernel.c
 KERNEL_ELF    := $(KERNEL_OUT)/kernel.elf
 KERNEL_BIN    := $(KERNEL_OUT)/kernel.bin
 KERNEL_ISO    := $(KERNEL_OUT)/lepton.iso
+HYBRID_ISO    := $(KERNEL_OUT)/lepton-hybrid.iso
+HYBRID_DIR    := $(KERNEL_OUT)/hybrid
 
 QEMU          ?= qemu-system-i386
 
@@ -74,6 +76,7 @@ HAVE_M32 := $(shell printf 'int main(void){return 0;}\n' > /tmp/.lp_m32.c; \
 .PHONY: all 64 32 asm run run32 \
         kernel kernel32 kernel64-check uefi64 uefi64-esp run-uefi64 \
         uefi64-shell run-uefi64-shell uefi64-kernel run-uefi64-kernel \
+        iso-hybrid run-iso-hybrid run-iso-hybrid-uefi \
         kernel-c kernel-bin iso run-kernel \
         clean clean-kernel check-m32 help
 
@@ -331,6 +334,38 @@ $(KERNEL_ISO): $(KERNEL_ELF) $(MODEL)
 
 iso: check-m32 $(KERNEL_ISO)
 
+$(HYBRID_ISO): check-m32 $(KERNEL_ELF) $(UEFI64_KERNEL) $(UEFI_MODEL) $(KERNEL_BOOT)
+	@rm -rf $(HYBRID_DIR)
+	@mkdir -p $(HYBRID_DIR)/boot/grub $(HYBRID_DIR)/models $(HYBRID_DIR)/efi/EFI/BOOT $(HYBRID_DIR)/efi/models
+	cp $(KERNEL_ELF) $(HYBRID_DIR)/boot/lepton32.elf
+	cp $(UEFI_MODEL) $(HYBRID_DIR)/models/smollm2-instruct-q4_0.gguf
+	cp $(UEFI64_KERNEL) $(HYBRID_DIR)/efi/EFI/BOOT/BOOTX64.EFI
+	cp $(UEFI_MODEL) $(HYBRID_DIR)/efi/models/smollm2-instruct-q4_0.gguf
+	printf 'set timeout=0\nmenuentry "Lepton BIOS32" {\n  multiboot (cd)/boot/lepton32.elf\n  module (cd)/models/smollm2-instruct-q4_0.gguf\n  boot\n}\n' > $(HYBRID_DIR)/boot/grub/grub.cfg
+	grub-mkstandalone -O i386-pc-eltorito \
+	    --locales="" --themes="" --fonts="" \
+	    --install-modules="multiboot normal iso9660 biosdisk" --modules="multiboot normal iso9660 biosdisk" \
+	    -o $(HYBRID_DIR)/boot/eltorito.img \
+	    "boot/grub/grub.cfg=$(HYBRID_DIR)/boot/grub/grub.cfg"
+	rm -f $(HYBRID_DIR)/boot/efi.img
+	dd if=/dev/zero of=$(HYBRID_DIR)/boot/efi.img bs=1M count=100 status=none
+	mkfs.fat -F16 $(HYBRID_DIR)/boot/efi.img >/dev/null
+	mcopy -i $(HYBRID_DIR)/boot/efi.img -s $(HYBRID_DIR)/efi/EFI $(HYBRID_DIR)/efi/models ::/
+	xorriso -as mkisofs -iso-level 3 -R -J \
+	    -b boot/eltorito.img -no-emul-boot -boot-load-size 4 -boot-info-table \
+	    -eltorito-alt-boot -e boot/efi.img -no-emul-boot \
+	    -isohybrid-gpt-basdat -o $@ $(HYBRID_DIR)
+	@echo "hybrid iso: $@"
+
+
+iso-hybrid: check-m32 $(HYBRID_ISO)
+
+run-iso-hybrid: check-m32 $(HYBRID_ISO)
+	$(QEMU) -cdrom $(HYBRID_ISO) -serial stdio -display none -no-reboot -boot d
+
+run-iso-hybrid-uefi: $(HYBRID_ISO)
+	$(QEMU64) -bios $(OVMF) -cdrom $(HYBRID_ISO) -serial stdio -display none -no-reboot -boot d
+
 # Ctrl-A (release), then X — quits QEMU
 # Ctrl-A (release), then C — switches to the QEMU monitor
 # Ctrl-A (release), then H — prints the full mux help
@@ -340,8 +375,7 @@ run-kernel: check-m32 $(KERNEL_ELF) $(KERNEL_TEST_MODULE)
 	    -serial mon:stdio -display none -no-reboot
 
 run-iso: check-m32 $(KERNEL_ISO)
-	$(QEMU) -cdrom $(KERNEL_ISO) -serial mon:stdio -display none -no-reboot \
-	    -boot d
+
 
 # ---------------------------------------------------------------------------
 #  Tests
@@ -426,6 +460,8 @@ help:
 	@echo "    make kernel-c      emit only the Lepton-generated C"
 	@echo "    make kernel-bin    also produce a flat .bin"
 	@echo "    make iso           build a GRUB-bootable lepton.iso"
+	@echo "    make iso-hybrid    build BIOS32 + UEFI64 hybrid ISO"
+	@echo "    make run-iso-hybrid / run-iso-hybrid-uefi"
 	@echo "    make run-kernel    boot the ELF in QEMU (serial on stdout)"
 	@echo "    make run-iso       boot the ISO in QEMU"
 	@echo ""
