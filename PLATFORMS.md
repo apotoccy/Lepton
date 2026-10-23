@@ -51,24 +51,23 @@ built by `run-uefi64-kernel`. Loading a model no longer requires rebuilding
 the EFI binary.
 
 A native build (`UEFI_NATIVE`) loads the model while Boot Services are
-available, calibrates TSC, calls `ExitBootServices`, installs a minimal
-exception IDT, and runs the kernel with direct GOP output, TSC timing, and
-serial input.
+available, calls `ExitBootServices`, installs an exception IDT, remaps the
+PIC, and runs a 100 Hz PIT timer interrupt. It uses direct GOP output,
+interrupt-driven ticks, and serial input.
 
-Native `ask` verification under OVMF:
+Native OVMF results after `-O2`:
 
 ```text
-ask "what is 2+2?" 8
-  prefill: 59030 ms
-  2 + 2 = 4.
-  answer: 14940 ms
+bench 1: 2110 ms/token
+ask "what is 2+2?" 8: prefill 59.03 s, answer 14.94 s
+chat system prefill: 33.35 s
+chat question prefill: 25.74 s
+chat answer: 21.49 s
 ```
 
-The UEFI64 build is now compiled with `-O2`; native `bench 1` is 2140 ms/token
-versus 5060 ms/token before the optimization fix.
-
-PS/2 input still needs scancode-set work; use serial input for native mode.
-Interrupts, APIC timer setup, and native `chat` are future work.
+Native `chat` returns `2 + 2 = 4.` and `poweroff` exits QEMU. PS/2 input still
+needs scancode-set work; serial input is the supported native path. APIC
+timer/interrupt ownership and USB HID remain future work.
 
 The 64-bit Boot Services kernel supports one-shot `ask` and multi-turn
 `chat`, with ChatML context status. OVMF verification:

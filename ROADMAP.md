@@ -18,9 +18,9 @@ Compiler and OS for edge AI inference, from 32-bit PCs to modern devices.
   UEFI64 kernel loads SmolLM2-135M-Instruct Q4_0 from the ESP, supports
   `ask`/`chat`, and accepts Ctrl+C cancellation. A BIOS32+UEFI64 hybrid ISO
   boots both paths.
-- **Next focus:** native PS/2/USB input, APIC timer/interrupts, and CI
-  coverage for the hybrid image. UEFI64 now uses the optimized build path and
-  is competitive with BIOS32 in QEMU.
+- **Next focus:** native PS/2/USB input, APIC ownership, and field validation
+  on Ryzen hardware. UEFI64 now uses the optimized build path, a PIC/PIT timer
+  interrupt, and verified native ask/chat.
 
 ## Verification checklist
 

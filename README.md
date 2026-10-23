@@ -53,8 +53,8 @@ make run-uefi64-native # native mode under OVMF (serial input)
 The UEFI64 build supports `ask` and `chat`; it loads SmolLM2 Q4_0 from the
 ESP and reports context/timing/heap status. UEFI64 is compiled with the same
 `-O$(OPT)` optimization policy as BIOS32. An optional native build exits
-Boot Services and runs with serial input and TSC timing; PS/2 is not reliable
-yet.
+Boot Services and runs with serial input, a PIC/PIT timer interrupt, and
+native `ask`/`chat`; PS/2 is not reliable yet.
 
 ## Key features
 

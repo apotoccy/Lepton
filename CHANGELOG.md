@@ -6,6 +6,8 @@
   Native `bench 1` improved from 5060 to 2140 ms/token; native ask from
   126.55/34.47 s to 59.03/14.94 s. Reduce native PE section count so OVMF can
   load the optimized image.
+- Added a native exception IDT, PIC remap, and 100 Hz PIT timer interrupt.
+  Verified native `chat` and `poweroff` under OVMF.
 
 - Added an optional UEFI64 native build that loads the model, calibrates TSC,
   exits Boot Services, installs a minimal exception IDT, and runs the kernel

@@ -280,6 +280,8 @@ static void serial_poll_input(void) {
 }
 #ifdef UEFI_NATIVE
 extern void native_idt_init(void);
+extern void native_irq_init(void);
+extern volatile uint64_t native_tick;
 #endif
 
 static void tsc_calibrate(void) {
@@ -531,15 +533,14 @@ void lp_plat_putc(char c) { con_putc(c); }
 void lp_plat_interrupts_init(void) { }
 void lp_plat_halt(void) {
 #ifdef UEFI_NATIVE
-    __asm__ volatile("pause");
+    __asm__ volatile("hlt");
 #else
     ST->BootServices->Stall(1000);
 #endif
 }
 UINT32 lp_plat_ticks(void) {
 #ifdef UEFI_NATIVE
-    if (tsc_per_10ms == 0) return 0;
-    return (UINT32)((rdtsc() - tsc_start) / tsc_per_10ms);
+    return (UINT32)native_tick;
 #else
     platform_ticks = time_ms() / 10;
     return platform_ticks;
@@ -670,6 +671,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st) {
     }
     ps2_init();
     native_idt_init();
+    native_irq_init();
 #endif
     main();
     return EFI_SUCCESS;
