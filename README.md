@@ -448,7 +448,8 @@ These are the boundaries of the current implementation, not a wish list; see
   prints progress; Ctrl+C cancels. Ordinary REPL typing is unaffected once
   `ask` returns. `chat` starts a multi-turn ChatML mode with `/exit`, `/new`,
   `/ctx`, `/help`, and Ctrl+C cancellation; it keeps conversation KV state
-  and drops the oldest turn when the context fills. PageUp/PageDown or
+  and drops the oldest turn when the context fills. Chat prompts show
+  `ctx` usage and answers report prefill/answer time and heap. PageUp/PageDown or
   Ctrl+P/Ctrl+N review up to eight previous VGA pages. The system/user ChatML
   prefix is cached after the first ask:
   QEMU baseline after batched prefill/SSE2 was ~58 s for the first prefill and

@@ -1789,13 +1789,21 @@ fn line_same(a: ptr[u8], a_len: i64, b: ptr[u8], b_len: i64) -> bool {
     return true;
 }
 
+/* Print the normal REPL or chat prompt with context usage. */
+fn print_prompt(chat: i32, used: i64, limit: i64) -> void {
+    if (chat == 1) {
+        print("you [{used}/{limit}]> ");
+    } else {
+        print("lepton> ");
+    }
+}
+
 /* Redraw the prompt and line, then restore the cursor position. */
 fn line_redraw(buf: ptr[u8], len: i64, cursor: i64,
-               old_len: i64, chat: i32) -> void {
+               old_len: i64, chat: i32, used: i64, limit: i64) -> void {
     print("\r");
     vga_set_color(0x0A as u8);
-    if (chat == 1) { print("you> "); }
-    else { print("lepton> "); }
+    print_prompt(chat, used, limit);
     vga_set_color(0x0F as u8);
     var i: i64 = 0;
     while (i < len) {
@@ -2244,7 +2252,7 @@ fn main() {
     var chat_ime: i64 = -1;
 
     vga_set_color(0x0A as u8);
-    print("lepton> ");
+    print_prompt(0 as i32, 0 as i64, 0 as i64);
     vga_set_color(0x0F as u8);
     while (true) {
         kbd_poll();
@@ -2268,7 +2276,7 @@ fn main() {
                 line_len = history_load(history_buf, history_len,
                                         history_pos, line_buf);
                 cursor = line_len;
-                line_redraw(line_buf, line_len, cursor, old_len, chat_mode);
+                line_redraw(line_buf, line_len, cursor, old_len, chat_mode, chat_len, active_cfg.max_seq);
             }
             continue;
         }
@@ -2284,7 +2292,7 @@ fn main() {
                                             history_pos, line_buf);
                     cursor = line_len;
                 }
-                line_redraw(line_buf, line_len, cursor, old_len, chat_mode);
+                line_redraw(line_buf, line_len, cursor, old_len, chat_mode, chat_len, active_cfg.max_seq);
             }
             continue;
         }
@@ -2325,7 +2333,7 @@ fn main() {
                     i = i + 1;
                 }
                 line_len = line_len - 1;
-                line_redraw(line_buf, line_len, cursor, old_len, chat_mode);
+                line_redraw(line_buf, line_len, cursor, old_len, chat_mode, chat_len, active_cfg.max_seq);
                 history_pos = history_n;
             }
             continue;
@@ -2336,7 +2344,7 @@ fn main() {
             if (nl > line_len) {
                 line_len = nl;
                 cursor = nl;
-                line_redraw(line_buf, line_len, cursor, old_len, chat_mode);
+                line_redraw(line_buf, line_len, cursor, old_len, chat_mode, chat_len, active_cfg.max_seq);
             }
             continue;
         }
@@ -2347,14 +2355,13 @@ fn main() {
             cursor = 0;
             history_pos = history_n;
             vga_set_color(0x0A as u8);
-            if (chat_mode == 1) { print("you> "); }
-            else { print("lepton> "); }
+            print_prompt(chat_mode, chat_len, active_cfg.max_seq);
             vga_set_color(0x0F as u8);
             continue;
         }
         if (ev == 0x109) {          /* Ctrl+L */
             lp_clear_screen();
-            line_redraw(line_buf, line_len, cursor, line_len, chat_mode);
+            line_redraw(line_buf, line_len, cursor, line_len, chat_mode, chat_len, active_cfg.max_seq);
             continue;
         }
 
@@ -2376,7 +2383,7 @@ fn main() {
                     }
                     line_len = line_len - 1;
                     cursor = cursor - 1;
-                    line_redraw(line_buf, line_len, cursor, old_len, chat_mode);
+                    line_redraw(line_buf, line_len, cursor, old_len, chat_mode, chat_len, active_cfg.max_seq);
                     history_pos = history_n;
                 }
             } else if (ch == 10 as u8 || ch == 13 as u8) {
@@ -2451,11 +2458,14 @@ fn main() {
                             clear_kv_cache(kv_k_buf, kv_v_buf,
                                            cc.n_layer, cc.max_seq,
                                            cc.n_head_kv * cc.head_dim);
+                            let rb0 = ticks();
                             if (prefill_tokens(cm, cc, chat_ids, 0 as i64,
                                                chat_len, scratch_bytes as ptr[f32],
                                                kv_k_buf, kv_v_buf,
                                                rope_freqs, logits_buf)) {
                                 chat_kv_len = chat_len;
+                                let rb1 = ticks();
+                                println("  rebuild: {(rb1 - rb0) as i64 * 10} ms");
                             } else {
                                 println("  context rebuild failed");
                             }
@@ -2493,6 +2503,8 @@ fn main() {
                                                       merge_table, merge_count,
                                                       seg, 0 as i64, ar,
                                                       chat_ids, chat_len, 512);
+                            println("  prefilling {chat_len - chat_kv_len} tokens...");
+                            let pf0 = ticks();
                             if (!prefill_tokens(cm, cc, chat_ids, chat_kv_len,
                                                 chat_len - chat_kv_len,
                                                 scratch_bytes as ptr[f32],
@@ -2501,9 +2513,12 @@ fn main() {
                                 chat_len = old_len;
                                 println("  chat prefill failed");
                             } else {
+                                let pf1 = ticks();
                                 chat_kv_len = chat_len;
                                 chat_turn_count = chat_turn_count + 1;
+                                println("  prefill: {(pf1 - pf0) as i64 * 10} ms");
                                 print("lepton: ");
+                                let at0 = ticks();
                                 var ended: i32 = 0;
                                 var ai: i64 = 0;
                                 let answer_max: i64 = 48;
@@ -2580,8 +2595,9 @@ fn main() {
                                     }
                                     chat_kv_len = chat_len;
                                 }
+                                let at1 = ticks();
                                 println("");
-                                println("  ctx {chat_len}/{cc.max_seq} | turns {chat_turn_count}");
+                                println("  ctx {chat_len}/{cc.max_seq} | turns {chat_turn_count} | {ai} tok / {(at1 - at0) as i64 * 10} ms | heap {lp_heap_used() / 1048576}/{lp_heap_max() / 1048576} MB");
                             }
                         }
                     }
@@ -3303,12 +3319,16 @@ fn main() {
                             clear_kv_cache(kv_k_buf, kv_v_buf,
                                            active_cfg.n_layer, active_cfg.max_seq,
                                            active_cfg.n_head_kv * active_cfg.head_dim);
+                            println("  prefilling {chat_len} system tokens...");
+                            let cp0 = ticks();
                             if (prefill_tokens(cm, cc, chat_ids, 0 as i64,
                                                chat_len, scratch_bytes as ptr[f32],
                                                kv_k_buf, kv_v_buf,
                                                rope_freqs, logits_buf)) {
                                 chat_kv_len = chat_len;
                                 chat_mode = 1;
+                                let cp1 = ticks();
+                                println("  system prefill: {(cp1 - cp0) as i64 * 10} ms");
                                 println("  chat mode; /help commands, /exit leaves, Ctrl+C cancels");
                             } else {
                                 println("  chat prefill failed");
@@ -3640,8 +3660,7 @@ fn main() {
                 line_len = 0;
                 cursor = 0;
                 history_pos = history_n;
-                if (chat_mode == 1) { print("you> "); }
-                else { print("lepton> "); }
+                print_prompt(chat_mode, chat_len, active_cfg.max_seq);
             } else if (ch == 3 as u8) {       /* serial Ctrl+C */
                 print("^C");
                 println("");
@@ -3649,8 +3668,7 @@ fn main() {
                 cursor = 0;
                 history_pos = history_n;
                 vga_set_color(0x0A as u8);
-                if (chat_mode == 1) { print("you> "); }
-                else { print("lepton> "); }
+                print_prompt(chat_mode, chat_len, active_cfg.max_seq);
                 vga_set_color(0x0F as u8);
             } else if (ch == 16 as u8) {      /* serial Ctrl+P: page up */
                 vga_page_up();
@@ -3658,14 +3676,14 @@ fn main() {
                 vga_page_down();
             } else if (ch == 12 as u8) {      /* serial Ctrl+L */
                 lp_clear_screen();
-                line_redraw(line_buf, line_len, cursor, line_len, chat_mode);
+                line_redraw(line_buf, line_len, cursor, line_len, chat_mode, chat_len, active_cfg.max_seq);
             } else if (ch == 9 as u8) {       /* serial Tab */
                 let old_len = line_len;
                 let nl = complete_line(line_buf, line_len, cursor);
                 if (nl > line_len) {
                     line_len = nl;
                     cursor = nl;
-                    line_redraw(line_buf, line_len, cursor, old_len, chat_mode);
+                    line_redraw(line_buf, line_len, cursor, old_len, chat_mode, chat_len, active_cfg.max_seq);
                 }
             } else if (ch >= 32 as u8 && ch < 127 as u8) {
                 if (line_len < 127) {
@@ -3686,7 +3704,7 @@ fn main() {
                         line_buf[cursor] = ch;
                         line_len = line_len + 1;
                         cursor = cursor + 1;
-                        line_redraw(line_buf, line_len, cursor, old_len, chat_mode);
+                        line_redraw(line_buf, line_len, cursor, old_len, chat_mode, chat_len, active_cfg.max_seq);
                         history_pos = history_n;
                     }
                 }

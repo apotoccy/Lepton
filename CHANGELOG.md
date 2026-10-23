@@ -10,6 +10,8 @@
   Ctrl+P/Ctrl+N; typing returns to the live screen.
 - Added rolling chat memory: track turns, drop the oldest turn when context
   fills, rebuild the retained KV, and add `/new`, `/ctx`, and `/help`.
+- Chat prompts show context usage; prefill/answer timing and heap usage are
+  reported after each turn.
 
 ## v0.3.1 — 2026-10-22
 

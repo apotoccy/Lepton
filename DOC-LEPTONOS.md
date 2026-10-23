@@ -121,7 +121,9 @@ cursor editing, eight-entry history, tab completion, and Ctrl+C/Ctrl+L.
   usage, `/new` resets the conversation, `/ctx` shows turn usage, `/help`
   lists chat commands, `/exit` leaves, and Ctrl+C cancels. When the context
   fills, the oldest turn is dropped and the retained turns are re-prefilled.
-  The raw `lepton>` REPL remains available outside chat.
+  Chat prompts show `[used/max]` context, and each answer reports prefill
+  time, answer time, token count, and heap. The raw `lepton>` REPL remains
+  available outside chat.
 - **PageUp/PageDown** or **Ctrl+P/Ctrl+N** — review the last eight VGA pages;
   any normal key returns to the live screen.
 - `keytest` — print raw keyboard events for five seconds.
