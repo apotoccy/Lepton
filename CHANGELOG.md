@@ -8,6 +8,9 @@
 - Added `PLATFORMS.md` and CI coverage for the 64-bit compile check.
 - Added a minimal UEFI64 PE application that reports serial/GOP/memory-map
   information under OVMF.
+- Added a UEFI64 platform shell with a GOP 8x16 console, ConIn line editing
+  and history, a 16 MB heap, RTC time, and `help`/`mem`/`config`/`time`/
+  `alloc`/`clear`/`echo`/`quit` commands.
 
 ## v0.4.0 — 2026-10-23
 

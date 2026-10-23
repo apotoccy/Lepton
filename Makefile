@@ -33,6 +33,8 @@ KERNEL64_OUT  := $(BUILD)/kernel64
 UEFI64_OUT    := $(BUILD)/uefi64
 UEFI64_EFI    := $(UEFI64_OUT)/hello.efi
 UEFI64_OBJ    := $(UEFI64_OUT)/hello.o
+UEFI64_SHELL  := $(UEFI64_OUT)/lepton.efi
+UEFI64_SHELL_OBJ := $(UEFI64_OUT)/shell.o
 UEFI64_ESP    := $(UEFI64_OUT)/esp.img
 UEFI64_DISK   := $(UEFI64_OUT)/disk.img
 QEMU64        ?= qemu-system-x86_64
@@ -64,6 +66,7 @@ HAVE_M32 := $(shell printf 'int main(void){return 0;}\n' > /tmp/.lp_m32.c; \
 
 .PHONY: all 64 32 asm run run32 \
         kernel kernel32 kernel64-check uefi64 uefi64-esp run-uefi64 \
+        uefi64-shell run-uefi64-shell \
         kernel-c kernel-bin iso run-kernel \
         clean clean-kernel check-m32 help
 
@@ -130,6 +133,20 @@ $(UEFI64_EFI): $(UEFI64_OBJ)
 
 uefi64: $(UEFI64_EFI)
 
+$(UEFI64_SHELL_OBJ): kernel/arch/uefi64/shell.c kernel/arch/uefi64/uefi.h kernel/arch/uefi64/font8x16.h
+	@mkdir -p $(UEFI64_OUT)
+	$(CC) -m64 -std=c11 -ffreestanding -fno-stack-protector -fno-pic \
+	    -mno-red-zone -fno-asynchronous-unwind-tables -fno-builtin \
+	    -fno-ident -Wall -Wextra -Wno-unused-parameter -c $< -o $@
+
+$(UEFI64_SHELL): $(UEFI64_SHELL_OBJ)
+	ld -m i386pep -nostdlib --subsystem 10 --entry efi_main \
+	    --image-base 0x10000000 -o $@ $<
+	objcopy --remove-section .comment --remove-section .note.gnu.property $@
+	@echo "uefi64 shell: $@"
+
+uefi64-shell: $(UEFI64_SHELL)
+
 $(UEFI64_ESP): $(UEFI64_EFI)
 	@mkdir -p $(UEFI64_OUT)/esp/EFI/BOOT
 	cp $(UEFI64_EFI) $(UEFI64_OUT)/esp/EFI/BOOT/BOOTX64.EFI
@@ -150,6 +167,24 @@ $(UEFI64_DISK): $(UEFI64_ESP)
 
 run-uefi64: $(UEFI64_DISK)
 	$(QEMU64) -bios $(OVMF) -drive format=raw,file=$(UEFI64_DISK) \
+	    -serial stdio -display none -no-reboot -m 256
+
+UEFI64_SHELL_ESP  := $(UEFI64_OUT)/shell-esp.img
+UEFI64_SHELL_DISK := $(UEFI64_OUT)/shell-disk.img
+$(UEFI64_SHELL_ESP): $(UEFI64_SHELL)
+	@mkdir -p $(UEFI64_OUT)/shell-esp/EFI/BOOT
+	cp $(UEFI64_SHELL) $(UEFI64_OUT)/shell-esp/EFI/BOOT/BOOTX64.EFI
+	rm -f $@
+	dd if=/dev/zero of=$@ bs=1M count=32 status=none
+	mkfs.fat -F16 $@ >/dev/null
+	mcopy -i $@ -s $(UEFI64_OUT)/shell-esp/EFI ::/
+$(UEFI64_SHELL_DISK): $(UEFI64_SHELL_ESP)
+	@truncate -s 64M $@
+	parted -s $@ mklabel msdos mkpart primary fat16 1MiB 63MiB set 1 boot on >/dev/null
+	sfdisk --part-type $@ 1 ef >/dev/null
+	dd if=$(UEFI64_SHELL_ESP) of=$@ bs=1M seek=1 conv=notrunc status=none
+run-uefi64-shell: $(UEFI64_SHELL_DISK)
+	$(QEMU64) -bios $(OVMF) -drive format=raw,file=$(UEFI64_SHELL_DISK) \
 	    -serial stdio -display none -no-reboot -m 256
 
 kernel-c: check-m32 $(KERNEL_C)
@@ -327,7 +362,8 @@ help:
 	@echo "    make kernel32      explicit BIOS32 kernel target"
 	@echo "    make kernel64-check compile the shared core as 64-bit C"
 	@echo "    make uefi64        build the minimal UEFI64 app"
-	@echo "    make run-uefi64    boot it with OVMF"
+	@echo "    make uefi64-shell  build the GOP/ConIn platform shell"
+	@echo "    make run-uefi64-shell boot the shell with OVMF"
 	@echo "    make kernel-c      emit only the Lepton-generated C"
 	@echo "    make kernel-bin    also produce a flat .bin"
 	@echo "    make iso           build a GRUB-bootable lepton.iso"

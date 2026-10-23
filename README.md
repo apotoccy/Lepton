@@ -40,6 +40,8 @@ make kernel32        # BIOS32
 make kernel64-check  # shared-core 64-bit compile check
 make uefi64          # minimal UEFI64 hello application
 make run-uefi64      # boot hello under OVMF
+make uefi64-shell    # GOP/ConIn UEFI64 platform shell
+make run-uefi64-shell # boot the shell under OVMF
 ```
 
 ## Key features

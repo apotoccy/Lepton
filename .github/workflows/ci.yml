@@ -50,6 +50,9 @@ jobs:
       - name: UEFI64 hello build
         run: make uefi64
 
+      - name: UEFI64 platform shell build
+        run: make uefi64-shell
+
       - name: GGUF fixture references
         run: |
           mkdir -p build

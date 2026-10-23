@@ -18,15 +18,21 @@ kernel/arch/uefi64/        UEFI64 port (next phase)
 | `make kernel` | Alias for `kernel32` | Existing build path |
 | `make kernel64-check` | Compile check | Verifies the shared core builds as 64-bit C |
 | `make uefi64` | Hello milestone | Minimal 64-bit EFI application |
-| `make run-uefi64` | Hello milestone | Boots the EFI app under OVMF |
+| `make run-uefi64` | Hello milestone | Boots the EFI hello app under OVMF |
+| `make uefi64-shell` | Shell milestone | GOP console + ConIn platform shell |
+| `make run-uefi64-shell` | Shell milestone | Boots the platform shell under OVMF |
 | `make iso` | Stable | BIOS GRUB ISO |
 
 `kernel64-check` is not a bootable UEFI kernel yet. It currently exposes
 32-bit pointer assumptions in the shared core, which the UEFI port will fix.
 
 The UEFI64 hello application boots under OVMF, prints over serial and GOP,
-reports the UEFI memory map, and locates the Graphics Output Protocol. It does
-not enter the Lepton kernel yet.
+reports the UEFI memory map, and locates the Graphics Output Protocol.
+
+The UEFI64 platform shell adds a framebuffer console with an embedded 8x16
+font, UEFI ConIn keyboard input, line editing/history, a 16 MB UEFI-backed
+heap, an RTC command, and `help`/`mem`/`config`/`clear`/`echo`/`quit`.
+It does not enter the Lepton kernel or load a model yet.
 
 ## Platform contract
 
