@@ -36,17 +36,17 @@ Record:
 
 | Measurement               | S9 result                            |
 |---------------------------|--------------------------------------|
-| `config` model            | SmolLM                               |
+| `config` model            | smollm2-instruct-q4_0.gguf           |
 | `mem` Heap used / limit   | 16036176 / 67108864 bytes            |
 | `keytest` events          | a - 97, f - 102, k - 107             |
 | `bench 8` ms/token        | 7270 ms (908.75 ms/token)            |
 | `selftest`                | skipped (unrecognized model profile) |
-| First ask prefill ms      |                                      |
-| First ask answer ms       |                                      |
-| Second ask prefill ms     |                                      |
-| Second ask answer ms      |                                      |
-| `2+2` answer correct      |                                      |
-| `3+3` answer correct      |                                      |
+| First ask prefill ms      | 16620 ms                             |
+| First ask answer ms       | 6420 ms                              |
+| Second ask prefill ms     | 6180 ms                              |
+| Second ask answer ms      | 6420 ms                              |
+| `2+2` answer correct      | 2 + 2 = 4                            |
+| `3+3` answer correct      | 3 + 3 = 3 +                          |
 
 ## QEMU reference after SSE2 + batched prefill
 
