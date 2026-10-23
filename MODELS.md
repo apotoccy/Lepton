@@ -245,7 +245,7 @@ Second question:
 ```
 
 The fixed system/user ChatML prefix is cached after the first ask. Prompt
-prefill is now layer-major/batched, and Q4_0 matvec uses SSE2. Repeated
+prefill is layer-major, and Q4_0 matvec uses SSE2. Repeated
 questions prefill only the question and assistant header. The cache is
 invalidated by `generate`, `genprompt`, `fwdpos`, `bench`, `gqapair`,
 `selftest`, `reset`, and other KV-clearing commands. On the S9 the first ask

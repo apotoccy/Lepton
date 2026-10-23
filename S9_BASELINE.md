@@ -48,7 +48,21 @@ Record:
 | `2+2` answer correct      | 2 + 2 = 4                            |
 | `3+3` answer correct      | 3 + 3 = 3 +                          |
 
-## QEMU reference after SSE2 + batched prefill
+## Batched Q4_0 experiment (reverted)
+
+The batched Q4_0 matvec was faster in QEMU but slower on the S9:
+
+| Measurement | Per-token SSE2 | Batched Q4_0 |
+|---|---:|---:|
+| First ask prefill | 16620 ms | 21780 ms |
+| First ask answer | 6420 ms | 6280 ms |
+| Second ask prefill | 6180 ms | 8730 ms |
+| Second ask answer | 6420 ms | 6280 ms |
+
+Answer generation was unchanged; only prefill regressed. The batch kernel was
+reverted in favor of the per-token SSE2 path.
+
+## QEMU reference after SSE2 + layer-major prefill
 
 TinyStories, 6 layers:
 
