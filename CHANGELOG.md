@@ -12,6 +12,8 @@
   fills, rebuild the retained KV, and add `/new`, `/ctx`, and `/help`.
 - Chat prompts show context usage; prefill/answer timing and heap usage are
   reported after each turn.
+- Refuse mixed K-quant models (Q4_K/Q5_K/Q6_K/Q5_0/Q5_1) before inference
+  instead of producing corrupt output; Q4_0 and Q8_0 remain supported.
 
 ## v0.3.1 — 2026-10-22
 

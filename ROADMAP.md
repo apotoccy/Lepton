@@ -278,7 +278,8 @@ tensors, not the 15M model label.
 - [x] Rolling chat context with oldest-turn eviction, `/new`, and `/ctx`
 - [x] Context-aware chat prompt with prefill/answer/heap status
 - [x] Add Q5_0/Q5_1 block support and fixtures
-- [ ] Investigate incorrect Q4_K_M output despite Q5_0/Q5_1 support
+- [x] Refuse mixed K-quant models with a clear compatibility error
+- [ ] Root-cause mixed K-quant forward corruption
 - [x] Add Q4_K dequantization and direct matvec, plus F16/F32 fallbacks
 - [x] Add Q5_K/Q6_K dequantization and direct matvecs
 - [ ] Plan memory for 1B+ models. They do not fit the current 64 MB heap;

@@ -455,8 +455,9 @@ These are the boundaries of the current implementation, not a wish list; see
   QEMU baseline after batched prefill/SSE2 was ~58 s for the first prefill and
   ~21 s for later questions. The cache is invalidated by KV-clearing commands.
   See [S9_BASELINE.md](S9_BASELINE.md) for the clean S9 measurement sequence. The tested file is
-  `models/smollm2-instruct-q4_0.gguf` (Q4_0); the Q4_K_S/Q4_K_M variants
-  contain Q5_0 tensors and are not supported yet. The base `smallm.gguf`
+  `models/smollm2-instruct-q4_0.gguf` (Q4_0); Q4_K_S/Q4_K_M are refused by
+  the mixed-K-quant compatibility guard. Use Q8_0 if a larger model is
+  acceptable. The base `smallm.gguf`
   remains for completion tests only.
 - **One backend.** Only scalar and x86-64 SSE2 are implemented. There is no
   AVX2, NEON/ARM, LLVM IR, or WASM backend yet.

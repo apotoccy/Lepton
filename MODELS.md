@@ -252,10 +252,10 @@ invalidated by `generate`, `genprompt`, `fwdpos`, `bench`, `gqapair`,
 can still take several minutes; use Ctrl+C and `keytest` to distinguish input
 failure from prefill waiting.
 
-Q5_0/Q5_1 block support is now implemented and fixture-validated. However, the
-QuantFactory Q4_K_M file still produced incorrect text during testing, while
-the Q4_0 file answers correctly. Treat Q4_0 as the verified Instruct profile;
-Q4_K_M remains under investigation.
+Q5_0/Q5_1 block support is implemented and fixture-validated, but mixed
+K-quant models still produce incorrect forward output. The kernel now refuses
+them with a clear compatibility error instead of emitting bad text. Use Q4_0
+or Q8_0 for Instruct inference.
 
 `selftest` is a base-profile check; on the Instruct model it reports a skip.
 Use `ask` for Instruct validation.

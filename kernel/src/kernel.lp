@@ -272,6 +272,23 @@ fn config_issue(cfg: ModelConfig) -> str {
     return "";
 }
 
+/* Return a reason when a model mixes unverified K-quant tensor types. */
+fn model_quant_issue(model: ptr[u8]) -> str {
+    let tc = read_u64(model, 8);
+    let kc = read_u64(model, 16);
+    var p = skip_kv_block(model, 24, kc);
+    for i in 0..(tc as i64) {
+        let ti = parse_tensor_info(model, p);
+        let ty = ti.ggml_type;
+        if (ty == 6 as u32 || ty == 7 as u32 || ty == 12 as u32
+                || ty == 13 as u32 || ty == 14 as u32) {
+            return "mixed K-quant model; use a Q4_0 or Q8_0 conversion";
+        }
+        p = p + tensor_info_size(model, p);
+    }
+    return "";
+}
+
 /* Estimate the workspace bytes required by a model configuration. */
 fn config_memory_bytes(cfg: ModelConfig) -> i64 {
     var wide = cfg.n_embd;
@@ -957,6 +974,11 @@ fn forward_token_at_pos(model: ptr[u8], cfg: ModelConfig,
                         kv_k: ptr[f32], kv_v: ptr[f32],
                         freqs: ptr[f64],
                         logits: ptr[f32]) -> bool {
+    let qissue = model_quant_issue(model);
+    if (qissue != "") {
+        println("  inference error: {qissue}");
+        return false;
+    }
     let issue = config_issue(cfg);
     if (issue != "") {
         println("  inference error: {issue}");
@@ -1143,6 +1165,11 @@ fn prefill_tokens(model: ptr[u8], cfg: ModelConfig,
                   wbuf: ptr[f32], kv_k: ptr[f32], kv_v: ptr[f32],
                   freqs: ptr[f64], logits: ptr[f32]) -> bool {
     if (count <= 0) { return true; }
+    let qissue = model_quant_issue(model);
+    if (qissue != "") {
+        println("  inference error: {qissue}");
+        return false;
+    }
     if (start_pos < 0 || start_pos + count > cfg.max_seq) {
         println("  inference error: prompt exceeds the context");
         return false;
@@ -2774,7 +2801,12 @@ fn main() {
                         } else if (!config_fits(cfg)) {
                             println("  inference = unsupported: workspace needs {config_memory_bytes(cfg)} bytes; budget is 62914560");
                         } else {
-                            println("  inference = supported");
+                            let qissue = model_quant_issue(cm);
+                            if (qissue != "") {
+                                println("  inference = unsupported: {qissue}");
+                            } else {
+                                println("  inference = supported");
+                            }
                         }
                     }
                 } else if (starts_with(text, "tensors") && (text[7] == '\0' || text[7] == ' ')) {
