@@ -29,6 +29,17 @@ as a GRUB ISO.
   models. Mixed K-quant files are refused explicitly. See
   [Current limitations](#current-limitations).
 
+## Platform targets
+
+Lepton currently ships a BIOS32 kernel for the S9 and QEMU. The shared core
+also compiles as 64-bit C; the bootable UEFI64 target is under development.
+See [PLATFORMS.md](PLATFORMS.md).
+
+```bash
+make kernel32        # BIOS32
+make kernel64-check  # shared-core 64-bit compile check
+```
+
 ## Key features
 
 - **Bare-metal AI:** runs a GGUF model directly on the CPU with no underlying OS

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Split the kernel onto a shared platform contract with a BIOS32 shim.
+- Added `kernel32` and `kernel64-check` targets; the shared core now compiles
+  as 64-bit C, exposing pointer-width work for the UEFI64 port.
+- Added `PLATFORMS.md` and CI coverage for the 64-bit compile check.
+
 ## v0.4.0 — 2026-10-23
 
 - Added `chat`, a multi-turn ChatML mode with a persistent system prefix,

@@ -1,0 +1,46 @@
+# Platform targets
+
+Lepton uses one shared kernel core with per-platform boot and driver shims.
+
+```text
+kernel/src/kernel.lp       shared core: GGUF, inference, REPL, chat
+kernel/src/runtime.c       shared heap, serial/VGA helpers, SSE2 kernels
+kernel/platform.h          platform contract and BootInfo
+kernel/arch/bios32/        BIOS32 implementation (current release)
+kernel/arch/uefi64/        UEFI64 port (next phase)
+```
+
+## Current targets
+
+| Target | Status | Use |
+|---|---|---|
+| `make kernel32` | Stable | BIOS/Multiboot kernel for the S9 and QEMU |
+| `make kernel` | Alias for `kernel32` | Existing build path |
+| `make kernel64-check` | Compile check | Verifies the shared core builds as 64-bit C |
+| `make iso` | Stable | BIOS GRUB ISO |
+
+`kernel64-check` is not a bootable UEFI kernel yet. It currently exposes
+32-bit pointer assumptions in the shared core, which the UEFI port will fix.
+
+## Platform contract
+
+The shared core calls only these platform entry points:
+
+- console: init, putc, clear, color, cursor, page up/down;
+- input: poll, read, cancel pending;
+- time: ticks, halt;
+- boot: module count/start/size/end, memory end;
+- reset: reboot, poweroff.
+
+`kernel/arch/bios32/platform.c` maps them to the existing VGA, PS/2, PIT,
+Multiboot, and ACPI implementations.
+
+## Planned hybrid ISO
+
+```text
+/boot/lepton32.elf          BIOS32 kernel
+/EFI/BOOT/BOOTX64.EFI      UEFI64 kernel
+/models/...gguf             shared model
+```
+
+The model and inference code are shared; the boot binaries are not.

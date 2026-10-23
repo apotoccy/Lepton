@@ -14,8 +14,9 @@ Compiler and OS for edge AI inference, from 32-bit PCs to modern devices.
   cache. Q8_0 is usable; mixed K-quant models are refused explicitly.
 - **S9:** baseline recorded; 908.75 ms/token for `bench 8`, first Ask prefill
   16.62 s, cached second prefill 6.18 s, answer 6.42 s.
-- **Next focus:** root-cause mixed K-quant corruption, then consider larger
-  context/heap and further SSE2 coverage.
+- **Platforms:** shared core plus BIOS32 shim; 64-bit compile check wired.
+  UEFI64 boot and hybrid ISO are the next platform milestone.
+- **Next focus:** UEFI64 boot, then hybrid BIOS/UEFI packaging.
 
 ## Verification checklist
 

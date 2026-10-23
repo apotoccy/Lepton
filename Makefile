@@ -28,6 +28,8 @@ KERNEL_LP     := $(KERNEL_DIR)/src/kernel.lp
 KERNEL_RT     := $(KERNEL_DIR)/src/runtime.c
 KERNEL_BOOT   := $(KERNEL_DIR)/arch/boot.S
 KERNEL_LD     := $(KERNEL_DIR)/arch/kernel.ld
+KERNEL_PLATFORM := $(KERNEL_DIR)/arch/bios32/platform.c
+KERNEL64_OUT  := $(BUILD)/kernel64
 
 KERNEL_CFLAGS := -m32 -msse2 -mfpmath=sse -mstackrealign -std=c11 -O$(OPT) \
                  -ffreestanding -fno-stack-protector -fno-pic -fno-builtin \
@@ -54,7 +56,7 @@ HAVE_M32 := $(shell printf 'int main(void){return 0;}\n' > /tmp/.lp_m32.c; \
                    rm -f /tmp/.lp_m32.c /tmp/.lp_m32)
 
 .PHONY: all 64 32 asm run run32 \
-        kernel kernel-c kernel-bin iso run-kernel \
+        kernel kernel32 kernel64-check kernel-c kernel-bin iso run-kernel \
         clean clean-kernel check-m32 help
 
 all: 64 32
@@ -90,8 +92,20 @@ run32: check-m32 32
 # ---------------------------------------------------------------------------
 #  Kernel rules
 # ---------------------------------------------------------------------------
-kernel: check-m32 $(KERNEL_ELF)
-	@echo "kernel ready: $(KERNEL_ELF)"
+kernel: kernel32
+
+kernel32: check-m32 $(KERNEL_ELF)
+	@echo "kernel32 ready: $(KERNEL_ELF)"
+
+# Compile the shared kernel core as 64-bit C. This is a build check for the
+# UEFI port, not yet a bootable kernel.
+kernel64-check:
+	@mkdir -p $(KERNEL64_OUT)
+	$(LEPTONC) $(KERNEL_LP) --freestanding -S -o $(KERNEL64_OUT)/kernel.c
+	$(CC) -m64 -ffreestanding -fno-stack-protector -fno-pic -fno-builtin \
+	    -fno-asynchronous-unwind-tables -Wall -Wextra -Wno-unused-parameter \
+	    -c $(KERNEL64_OUT)/kernel.c -o $(KERNEL64_OUT)/kernel.o
+	@echo "kernel64 compile check: $(KERNEL64_OUT)/kernel.o"
 
 kernel-c: check-m32 $(KERNEL_C)
 
@@ -117,6 +131,10 @@ $(KERNEL_OUT)/vga.o: kernel/arch/vga.c
 	@mkdir -p $(KERNEL_OUT)
 	$(CC) $(KERNEL_CFLAGS) -mno-sse -mno-sse2 -mfpmath=387 -c $< -o $@
 
+
+$(KERNEL_OUT)/platform.o: $(KERNEL_PLATFORM) $(KERNEL_DIR)/platform.h
+	@mkdir -p $(KERNEL_OUT)
+	$(CC) $(KERNEL_CFLAGS) -mno-sse -mno-sse2 -mfpmath=387 -c $< -o $@
 
 $(KERNEL_OUT)/multiboot.o: kernel/arch/multiboot.c
 	@mkdir -p $(KERNEL_OUT)
@@ -145,12 +163,13 @@ $(KERNEL_ELF): $(KERNEL_OUT)/boot.o \
                $(KERNEL_OUT)/interrupts.o \
                $(KERNEL_OUT)/multiboot.o \
                $(KERNEL_OUT)/vga.o \
+               $(KERNEL_OUT)/platform.o \
                $(KERNEL_LD)
 	$(CC) $(KERNEL_LDFLAGS) -o $@ \
 	    $(KERNEL_OUT)/boot.o $(KERNEL_OUT)/isr.o \
 	    $(KERNEL_OUT)/kernel.o $(KERNEL_OUT)/runtime.o \
 	    $(KERNEL_OUT)/interrupts.o $(KERNEL_OUT)/multiboot.o \
-	    $(KERNEL_OUT)/vga.o \
+	    $(KERNEL_OUT)/vga.o $(KERNEL_OUT)/platform.o \
 	    $(KERNEL_LIBS)
 	@echo "kernel built: $@"
 
@@ -260,6 +279,8 @@ help:
 	@echo ""
 	@echo "  Kernel:"
 	@echo "    make kernel        build build/kernel/kernel.elf"
+	@echo "    make kernel32      explicit BIOS32 kernel target"
+	@echo "    make kernel64-check compile the shared core as 64-bit C"
 	@echo "    make kernel-c      emit only the Lepton-generated C"
 	@echo "    make kernel-bin    also produce a flat .bin"
 	@echo "    make iso           build a GRUB-bootable lepton.iso"

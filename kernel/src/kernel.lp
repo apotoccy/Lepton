@@ -4,34 +4,34 @@ import "std/gguf/tensor.lp";
 import "std/gguf/dequant.lp";
 import "std/gguf/config.lp";
 
-extern fn serial_init() -> void;
-extern fn vga_init() -> void;
-extern fn interrupts_init() -> void;
-extern fn cpu_hlt() -> void;
-extern fn ticks() -> u32;
-extern fn kbd_read() -> u32;
-extern fn kbd_poll() -> void;
-extern fn kbd_cancel_pending() -> u32;
-extern fn lp_cursor_left() -> void;
-extern fn lp_cursor_right() -> void;
-extern fn lp_clear_screen() -> void;
+extern fn lp_plat_serial_init() -> void;
+extern fn lp_plat_console_init() -> void;
+extern fn lp_plat_interrupts_init() -> void;
+extern fn lp_plat_halt() -> void;
+extern fn lp_plat_ticks() -> u32;
+extern fn lp_plat_input_read() -> u32;
+extern fn lp_plat_input_poll() -> void;
+extern fn lp_plat_input_cancel_pending() -> u32;
+extern fn lp_plat_cursor_left() -> void;
+extern fn lp_plat_cursor_right() -> void;
+extern fn lp_plat_clear_screen() -> void;
 extern fn lp_heap_used() -> i64;
 extern fn lp_heap_max() -> i64;
-extern fn vga_set_color(c: u8) -> void;
-extern fn vga_page_up() -> void;
-extern fn vga_page_down() -> void;
-extern fn mb_module_count() -> u32;
-extern fn mb_module_start(idx: u32) -> u32;
-extern fn mb_module_size(idx: u32) -> u32;
+extern fn lp_plat_set_color(c: u8) -> void;
+extern fn lp_plat_page_up() -> void;
+extern fn lp_plat_page_down() -> void;
+extern fn lp_plat_module_count() -> u32;
+extern fn lp_plat_module_start(idx: u32) -> u32;
+extern fn lp_plat_module_size(idx: u32) -> u32;
 extern fn lp_argmax(logits: ptr[f32], n: i32) -> u32;
 extern fn lp_sample(logits: ptr[f32], n: i32, temperature: f32, top_k: i32) -> u32;
 extern fn lp_rand_seed(s: u32) -> void;
-extern fn mb_module_end(idx: u32) -> u32;
-extern fn mb_memory_end() -> u32;
+extern fn lp_plat_module_end(idx: u32) -> u32;
+extern fn lp_plat_memory_end() -> u32;
 extern fn lp_alloc_init(start: ptr[u8], size: u32) -> void;
 extern fn lp_alloc_bytes(n: i64) -> ptr[u8];
-extern fn lp_reboot() -> void;
-extern fn lp_poweroff() -> void;
+extern fn lp_plat_reboot() -> void;
+extern fn lp_plat_poweroff() -> void;
 extern fn lp_matvec_q4_0_sse2(base: ptr[u8], x: ptr[f32], y: ptr[f32],
                               rows: i32, cols: i32) -> void;
 
@@ -1829,9 +1829,9 @@ fn print_prompt(chat: i32, used: i64, limit: i64) -> void {
 fn line_redraw(buf: ptr[u8], len: i64, cursor: i64,
                old_len: i64, chat: i32, used: i64, limit: i64) -> void {
     print("\r");
-    vga_set_color(0x0A as u8);
+    lp_plat_set_color(0x0A as u8);
     print_prompt(chat, used, limit);
-    vga_set_color(0x0F as u8);
+    lp_plat_set_color(0x0F as u8);
     var i: i64 = 0;
     while (i < len) {
         let c = buf[i] as char;
@@ -1846,7 +1846,7 @@ fn line_redraw(buf: ptr[u8], len: i64, cursor: i64,
     var back = len - cursor;
     if (old_len > len) { back = back + (old_len - len); }
     while (back > 0) {
-        lp_cursor_left();
+        lp_plat_cursor_left();
         back = back - 1;
     }
 }
@@ -2012,8 +2012,8 @@ fn stop_match(tail: ptr[u8], tail_len: i64,
 
 /* Poll the keyboard and report Ctrl+C without consuming normal input. */
 fn generation_cancelled() -> bool {
-    kbd_poll();
-    return kbd_cancel_pending() != 0 as u32;
+    lp_plat_input_poll();
+    return lp_plat_input_cancel_pending() != 0 as u32;
 }
 
 /* Encode a text slice and append its token IDs to the output. */
@@ -2051,17 +2051,17 @@ fn ask_text(seg: ptr[u8], text: str, extra_nl: bool) -> i64 {
 
 /* Boot the kernel, run self-checks, and start the interactive REPL. */
 fn main() {
-    serial_init();
-    vga_init();
+    lp_plat_serial_init();
+    lp_plat_console_init();
 
     /* Place the heap 1 MB after the loaded model and bound it by the
        Multiboot memory map. Cap at 64 MB; require at least 8 MB. */
     var heap_addr: u32 = 16777216 as u32;
-    if (mb_module_count() > 0 as u32) {
-        heap_addr = mb_module_end(0 as u32) + 1048576 as u32;
+    if (lp_plat_module_count() > 0 as u32) {
+        heap_addr = lp_plat_module_end(0 as u32) + 1048576 as u32;
     }
     heap_addr = (heap_addr + 4095 as u32) & 0xFFFFF000 as u32;
-    var ram_end = mb_memory_end();
+    var ram_end = lp_plat_memory_end();
     if (ram_end == 0 as u32) {
         ram_end = 134217728 as u32;   /* conservative fallback */
     }
@@ -2069,7 +2069,7 @@ fn main() {
     if (heap_end <= heap_addr || heap_end - heap_addr < 8388608 as u32) {
         println("FATAL: not enough RAM for the kernel heap");
         println("  need at least 8 MB after the loaded module");
-        while (true) { cpu_hlt(); }
+        while (true) { lp_plat_halt(); }
     }
     var heap_size = heap_end - heap_addr;
     if (heap_size > 67108864 as u32) {
@@ -2224,8 +2224,8 @@ fn main() {
 
     /* ---- 7. Interrupts + interactive shell ---- */
     var active_cfg = default_model_config();
-    if (mb_module_count() > 0 as u32) {
-        let boot_cfg = model_config(mb_module_start(0 as u32) as ptr[u8]);
+    if (lp_plat_module_count() > 0 as u32) {
+        let boot_cfg = model_config(lp_plat_module_start(0 as u32) as ptr[u8]);
         if (config_allocatable(boot_cfg)) {
             active_cfg = boot_cfg;
         } else {
@@ -2252,7 +2252,7 @@ fn main() {
     var merge_count: i64 = -1;
     build_rope_freqs(rope_freqs, active_cfg.head_dim, active_cfg.rope_base);
     println("[7] Enabling interrupts");
-    interrupts_init();
+    lp_plat_interrupts_init();
     println("    timer at 100 Hz, keyboard ready");
     println("    commands: modules, info, config, tensors, embed, forward, fwdpos, q4ktest, bench [N], gqapair, generate [T] [K] [N], encode, genprompt, ask [n], chat, keytest, stop, mem, selftest, tensor, matvec, decodetok, vocab, reset, reboot, poweroff, clear, filetest, help");
     println("");
@@ -2278,22 +2278,22 @@ fn main() {
     var chat_ims: i64 = -1;
     var chat_ime: i64 = -1;
 
-    vga_set_color(0x0A as u8);
+    lp_plat_set_color(0x0A as u8);
     print_prompt(0 as i32, 0 as i64, 0 as i64);
-    vga_set_color(0x0F as u8);
+    lp_plat_set_color(0x0F as u8);
     while (true) {
-        kbd_poll();
-        cpu_hlt();
-        kbd_poll();
-        let ev = kbd_read();
+        lp_plat_input_poll();
+        lp_plat_halt();
+        lp_plat_input_poll();
+        let ev = lp_plat_input_read();
         if (ev == 0) { continue; }
 
         if (ev == 0x10A) {          /* PageUp */
-            vga_page_up();
+            lp_plat_page_up();
             continue;
         }
         if (ev == 0x10B) {          /* PageDown */
-            vga_page_down();
+            lp_plat_page_down();
             continue;
         }
         if (ev == 0x100) {          /* Up */
@@ -2326,28 +2326,28 @@ fn main() {
         if (ev == 0x102) {          /* Left */
             if (cursor > 0) {
                 cursor = cursor - 1;
-                lp_cursor_left();
+                lp_plat_cursor_left();
             }
             continue;
         }
         if (ev == 0x103) {          /* Right */
             if (cursor < line_len) {
                 cursor = cursor + 1;
-                lp_cursor_right();
+                lp_plat_cursor_right();
             }
             continue;
         }
         if (ev == 0x104) {          /* Home */
             while (cursor > 0) {
                 cursor = cursor - 1;
-                lp_cursor_left();
+                lp_plat_cursor_left();
             }
             continue;
         }
         if (ev == 0x105) {          /* End */
             while (cursor < line_len) {
                 cursor = cursor + 1;
-                lp_cursor_right();
+                lp_plat_cursor_right();
             }
             continue;
         }
@@ -2381,13 +2381,13 @@ fn main() {
             line_len = 0;
             cursor = 0;
             history_pos = history_n;
-            vga_set_color(0x0A as u8);
+            lp_plat_set_color(0x0A as u8);
             print_prompt(chat_mode, chat_len, active_cfg.max_seq);
-            vga_set_color(0x0F as u8);
+            lp_plat_set_color(0x0F as u8);
             continue;
         }
         if (ev == 0x109) {          /* Ctrl+L */
-            lp_clear_screen();
+            lp_plat_clear_screen();
             line_redraw(line_buf, line_len, cursor, line_len, chat_mode, chat_len, active_cfg.max_seq);
             continue;
         }
@@ -2427,7 +2427,7 @@ fn main() {
                         ask_prefix_valid = 0;
                         println("  left chat mode");
                     } else if (starts_with(text, "/new")) {
-                        let cm = mb_module_start(0 as u32) as ptr[u8];
+                        let cm = lp_plat_module_start(0 as u32) as ptr[u8];
                         let cc = model_config(cm);
                         clear_kv_cache(kv_k_buf, kv_v_buf,
                                        cc.n_layer, cc.max_seq,
@@ -2451,7 +2451,7 @@ fn main() {
                         println("  /ctx  show context and turn usage");
                         println("  /exit leave chat mode; Ctrl+C cancels generation");
                     } else {
-                        let cm = mb_module_start(0 as u32) as ptr[u8];
+                        let cm = lp_plat_module_start(0 as u32) as ptr[u8];
                         let cc = model_config(cm);
                         let budget = cc.max_seq - 64;
 
@@ -2485,13 +2485,13 @@ fn main() {
                             clear_kv_cache(kv_k_buf, kv_v_buf,
                                            cc.n_layer, cc.max_seq,
                                            cc.n_head_kv * cc.head_dim);
-                            let rb0 = ticks();
+                            let rb0 = lp_plat_ticks();
                             if (prefill_tokens(cm, cc, chat_ids, 0 as i64,
                                                chat_len, scratch_bytes as ptr[f32],
                                                kv_k_buf, kv_v_buf,
                                                rope_freqs, logits_buf)) {
                                 chat_kv_len = chat_len;
-                                let rb1 = ticks();
+                                let rb1 = lp_plat_ticks();
                                 println("  rebuild: {(rb1 - rb0) as i64 * 10} ms");
                             } else {
                                 println("  context rebuild failed");
@@ -2531,7 +2531,7 @@ fn main() {
                                                       seg, 0 as i64, ar,
                                                       chat_ids, chat_len, 512);
                             println("  prefilling {chat_len - chat_kv_len} tokens...");
-                            let pf0 = ticks();
+                            let pf0 = lp_plat_ticks();
                             if (!prefill_tokens(cm, cc, chat_ids, chat_kv_len,
                                                 chat_len - chat_kv_len,
                                                 scratch_bytes as ptr[f32],
@@ -2540,12 +2540,12 @@ fn main() {
                                 chat_len = old_len;
                                 println("  chat prefill failed");
                             } else {
-                                let pf1 = ticks();
+                                let pf1 = lp_plat_ticks();
                                 chat_kv_len = chat_len;
                                 chat_turn_count = chat_turn_count + 1;
                                 println("  prefill: {(pf1 - pf0) as i64 * 10} ms");
                                 print("lepton: ");
-                                let at0 = ticks();
+                                let at0 = lp_plat_ticks();
                                 var ended: i32 = 0;
                                 var ai: i64 = 0;
                                 let answer_max: i64 = 48;
@@ -2622,25 +2622,25 @@ fn main() {
                                     }
                                     chat_kv_len = chat_len;
                                 }
-                                let at1 = ticks();
+                                let at1 = lp_plat_ticks();
                                 println("");
                                 println("  ctx {chat_len}/{cc.max_seq} | turns {chat_turn_count} | {ai} tok / {(at1 - at0) as i64 * 10} ms | heap {lp_heap_used() / 1048576}/{lp_heap_max() / 1048576} MB");
                             }
                         }
                     }
                 } else if (starts_with(text, "modules")) {
-                    let n = mb_module_count();
+                    let n = lp_plat_module_count();
                     println("  {n} module(s)");
                     for i in 0..(n as i64) {
-                        let mbst = mb_module_start(i as u32);
-                        let mbsz = mb_module_size(i as u32);
+                        let mbst = lp_plat_module_start(i as u32);
+                        let mbsz = lp_plat_module_size(i as u32);
                         println("  [{i}] start={mbst} size={mbsz}");
                     }
                 } else if (starts_with(text, "info")) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
-                        let model = mb_module_start(0 as u32) as ptr[u8];
+                        let model = lp_plat_module_start(0 as u32) as ptr[u8];
                         let magic = read_u32(model, 0);
                         if (magic != 0x46554747 as u32) {
                             println("  not a GGUF file");
@@ -2654,10 +2654,10 @@ fn main() {
                         }
                     }
                 } else if (starts_with(text, "tensor") && (text[6] == '\0' || text[6] == ' ')) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
-                        let model = mb_module_start(0 as u32) as ptr[u8];
+                        let model = lp_plat_module_start(0 as u32) as ptr[u8];
                         let kc = read_u64(model, 16);
                         let kv_end = skip_kv_block(model, 24, kc);
                         let ti = parse_tensor_info(model, kv_end);
@@ -2669,10 +2669,10 @@ fn main() {
                         println("  bytes    = {tensor_byte_size(ti)}");
                     }
                 } else if (starts_with(text, "matvec")) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
-                        let model = mb_module_start(0 as u32) as ptr[u8];
+                        let model = lp_plat_module_start(0 as u32) as ptr[u8];
                         let tc = read_u64(model, 8);
                         let kc = read_u64(model, 16);
                         let kv_end = skip_kv_block(model, 24, kc);
@@ -2732,13 +2732,13 @@ fn main() {
                         }
                     }
                 } else if (starts_with(text, "decodetok")) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
                         let tok_id = parse_int_at(text, 9);
                         if (tok_count < 0) {
                             tok_count = build_tok_offsets(
-                                mb_module_start(0 as u32) as ptr[u8],
+                                lp_plat_module_start(0 as u32) as ptr[u8],
                                 tok_table, active_cfg.vocab_size);
                             if (tok_count < 0) {
                                 println("  no tokenizer.ggml.tokens in model");
@@ -2750,7 +2750,7 @@ fn main() {
                             if (tok_id < 0 || tok_id >= tok_count) {
                                 println("  token id out of range");
                             } else {
-                                let model = mb_module_start(0 as u32) as ptr[u8];
+                                let model = lp_plat_module_start(0 as u32) as ptr[u8];
                                 let tokstr = decode_tok(model, tok_table, tok_count, tok_id as u32);
                                 print("  [{tok_id}] '");
                                 print_token(tokstr);
@@ -2759,7 +2759,7 @@ fn main() {
                         }
                     }
                 } else if (starts_with(text, "vocab")) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
                         var a = parse_int_at(text, 5);
@@ -2768,7 +2768,7 @@ fn main() {
                         if (b < a) { b = a; }
                         if (tok_count < 0) {
                             tok_count = build_tok_offsets(
-                                mb_module_start(0 as u32) as ptr[u8],
+                                lp_plat_module_start(0 as u32) as ptr[u8],
                                 tok_table, active_cfg.vocab_size);
                             if (tok_count < 0) {
                                 println("  no tokenizer.ggml.tokens in model");
@@ -2779,7 +2779,7 @@ fn main() {
                         if (tok_count > 0) {
                             if (b >= tok_count) { b = tok_count - 1; }
                             if (a < 0) { a = 0; }
-                            let model = mb_module_start(0 as u32) as ptr[u8];
+                            let model = lp_plat_module_start(0 as u32) as ptr[u8];
                             for n in a..(b + 1) {
                                 let tokstr = decode_tok(model, tok_table, tok_count, n as u32);
                                 print("  [{n}] '");
@@ -2789,10 +2789,10 @@ fn main() {
                         }
                     }
                 } else if (starts_with(text, "config")) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
-                        let cm = mb_module_start(0 as u32) as ptr[u8];
+                        let cm = lp_plat_module_start(0 as u32) as ptr[u8];
                         let cfg = model_config(cm);
                         print_model_config(cfg);
                         let issue = config_issue(cfg);
@@ -2810,10 +2810,10 @@ fn main() {
                         }
                     }
                 } else if (starts_with(text, "tensors") && (text[7] == '\0' || text[7] == ' ')) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
-                        let tm = mb_module_start(0 as u32) as ptr[u8];
+                        let tm = lp_plat_module_start(0 as u32) as ptr[u8];
                         let ttc = read_u64(tm, 8);
                         let tkc = read_u64(tm, 16);
                         let tstart = skip_kv_block(tm, 24, tkc);
@@ -2828,16 +2828,16 @@ fn main() {
                         }
                     }
                 } else if (starts_with(text, "embed")) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
                         if (tok_count < 0) {
                             tok_count = build_tok_offsets(
-                                mb_module_start(0 as u32) as ptr[u8],
+                                lp_plat_module_start(0 as u32) as ptr[u8],
                                 tok_table, active_cfg.vocab_size);
                         }
                         let etok = parse_int_at(text, 5);
-                        let em = mb_module_start(0 as u32) as ptr[u8];
+                        let em = lp_plat_module_start(0 as u32) as ptr[u8];
                         let etc = read_u64(em, 8);
                         let ekc = read_u64(em, 16);
                         let estart = skip_kv_block(em, 24, ekc);
@@ -2868,15 +2868,15 @@ fn main() {
                         }
                     }
                 } else if (starts_with(text, "forward")) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
                         if (tok_count < 0) {
                             tok_count = build_tok_offsets(
-                                mb_module_start(0 as u32) as ptr[u8],
+                                lp_plat_module_start(0 as u32) as ptr[u8],
                                 tok_table, active_cfg.vocab_size);
                         }
-                        let fwd_model = mb_module_start(0 as u32) as ptr[u8];
+                        let fwd_model = lp_plat_module_start(0 as u32) as ptr[u8];
                         let fwd_cfg = model_config(fwd_model);
                         let fwd_buf = scratch_bytes as ptr[f32];
                         println("  running forward for token <s> (id 1)...");
@@ -2900,10 +2900,10 @@ fn main() {
                         }
                     }
                 } else if (starts_with(text, "qktest")) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
-                        let km = mb_module_start(0 as u32) as ptr[u8];
+                        let km = lp_plat_module_start(0 as u32) as ptr[u8];
                         let kdata = model_data_start(km);
                         let ktc = read_u64(km, 8);
                         let kkc = read_u64(km, 16);
@@ -2939,10 +2939,10 @@ fn main() {
                         }
                     }
                 } else if (starts_with(text, "q4ktest")) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
-                        let qm = mb_module_start(0 as u32) as ptr[u8];
+                        let qm = lp_plat_module_start(0 as u32) as ptr[u8];
                         let qdata = model_data_start(qm);
                         let qtc = read_u64(qm, 8);
                         let qkc = read_u64(qm, 16);
@@ -2961,10 +2961,10 @@ fn main() {
                         println("  q4k sum={qsum} dot={qy[0]}");
                     }
                 } else if (starts_with(text, "bench")) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
-                        let bn_m = mb_module_start(0 as u32) as ptr[u8];
+                        let bn_m = lp_plat_module_start(0 as u32) as ptr[u8];
                         let bn_cfg = model_config(bn_m);
                         let bn_n_arg = parse_int_at(text, 5);
                         var bn_n: i64 = 8;
@@ -2975,7 +2975,7 @@ fn main() {
                                        active_cfg.n_layer,
                                        active_cfg.max_seq,
                                        active_cfg.n_head_kv * active_cfg.head_dim);
-                        let bn_t0 = ticks();
+                        let bn_t0 = lp_plat_ticks();
                         var bn_ok: i32 = 1;
                         var bn_i: i64 = 0;
                         while (bn_i < bn_n) {
@@ -2991,7 +2991,7 @@ fn main() {
                             bn_i = bn_i + 1;
                             if ((bn_i & 3) == 0) { print("."); }
                         }
-                        let bn_t1 = ticks();
+                        let bn_t1 = lp_plat_ticks();
                         println("");
                         if (bn_ok == 1) {
                             let bn_ms = (bn_t1 - bn_t0) as i64 * 10;
@@ -3000,10 +3000,10 @@ fn main() {
                         }
                     }
                 } else if (starts_with(text, "gqapair")) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
-                        let gp_m = mb_module_start(0 as u32) as ptr[u8];
+                        let gp_m = lp_plat_module_start(0 as u32) as ptr[u8];
                         let gp_cfg = model_config(gp_m);
                         ask_prefix_valid = 0;
                         clear_kv_cache(kv_k_buf, kv_v_buf,
@@ -3027,18 +3027,18 @@ fn main() {
                         }
                     }
                 } else if (starts_with(text, "fwdpos")) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
                         if (tok_count < 0) {
                             tok_count = build_tok_offsets(
-                                mb_module_start(0 as u32) as ptr[u8],
+                                lp_plat_module_start(0 as u32) as ptr[u8],
                                 tok_table, active_cfg.vocab_size);
                         }
                         let fp_pos = parse_int_at(text, 6);
                         let fp_end = parse_int_end(text, 6);
                         let fp_tok = parse_int_at(text, fp_end);
-                        let fp_m = mb_module_start(0 as u32) as ptr[u8];
+                        let fp_m = lp_plat_module_start(0 as u32) as ptr[u8];
                         let fp_cfg = model_config(fp_m);
                         let fp_w = scratch_bytes as ptr[f32];
                         let fp_a = activation_buf as ptr[f32];
@@ -3061,12 +3061,12 @@ fn main() {
                         }
                     }
                 } else if (starts_with(text, "generate") && (text[8] == '\0' || text[8] == ' ')) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
                         if (tok_count < 0) {
                             tok_count = build_tok_offsets(
-                                mb_module_start(0 as u32) as ptr[u8],
+                                lp_plat_module_start(0 as u32) as ptr[u8],
                                 tok_table, active_cfg.vocab_size);
                         }
                         var gen_temp: f32 = 1.0f;
@@ -3081,8 +3081,8 @@ fn main() {
                             let n_arg = parse_int_at(text, k_end);
                             if (n_arg > 0) { gen_n = n_arg; }
                         }
-                        lp_rand_seed(ticks() + 1 as u32);
-                        let gen_m = mb_module_start(0 as u32) as ptr[u8];
+                        lp_rand_seed(lp_plat_ticks() + 1 as u32);
+                        let gen_m = lp_plat_module_start(0 as u32) as ptr[u8];
                         let gen_cfg = model_config(gen_m);
                         if (gen_n > gen_cfg.max_seq) {
                             println("  note: generation capped to the {gen_cfg.max_seq}-token context");
@@ -3092,7 +3092,7 @@ fn main() {
                         let gen_tail = alloc([u8; 128]) as ptr[u8];
                         var gen_tail_len: i64 = 0;
 
-                        println("  Model starts at RAM address: {mb_module_start(0 as u32)}");
+                        println("  Model starts at RAM address: {lp_plat_module_start(0 as u32)}");
 
                         let gen_w = scratch_bytes as ptr[f32];
                         let gen_a = activation_buf as ptr[f32];
@@ -3129,24 +3129,24 @@ fn main() {
                         println("");
                     }
                 } else if (starts_with(text, "encode") && (text[6] == '\0' || text[6] == ' ')) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
                         if (tok_count < 0) {
                             tok_count = build_tok_offsets(
-                                mb_module_start(0 as u32) as ptr[u8],
+                                lp_plat_module_start(0 as u32) as ptr[u8],
                                 tok_table, active_cfg.vocab_size);
                         }
                         if (merge_count < 0) {
                             merge_count = build_merge_offsets(
-                                mb_module_start(0 as u32) as ptr[u8],
+                                lp_plat_module_start(0 as u32) as ptr[u8],
                                 merge_table);
                         }
                         if (merge_count < 0) {
                             merge_count = 0;   /* use greedy fallback */
                         }
                         {
-                            let em = mb_module_start(0 as u32) as ptr[u8];
+                            let em = lp_plat_module_start(0 as u32) as ptr[u8];
                             /* Line is at line_buf[0..line_len]. Text starts at 7. */
                             let enc_ids = alloc([u32; 256]) as ptr[u32];
                             let n_enc = encode_prompt_dispatch(em, tok_table, tok_count,
@@ -3167,17 +3167,17 @@ fn main() {
                         }
                     }
                 } else if (starts_with(text, "genprompt") && (text[9] == '\0' || text[9] == ' ')) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
                         if (tok_count < 0) {
                             tok_count = build_tok_offsets(
-                                mb_module_start(0 as u32) as ptr[u8],
+                                lp_plat_module_start(0 as u32) as ptr[u8],
                                 tok_table, active_cfg.vocab_size);
                         }
                         if (merge_count < 0) {
                             merge_count = build_merge_offsets(
-                                mb_module_start(0 as u32) as ptr[u8],
+                                lp_plat_module_start(0 as u32) as ptr[u8],
                                 merge_table);
                         }
                         if (merge_count < 0) {
@@ -3199,7 +3199,7 @@ fn main() {
                                 let gp_kend = parse_int_end(text, gp_tend);
                                 let gp_nval = parse_int_at(text, gp_kend);
                                 if (gp_nval > 0) { gp_n = gp_nval; }
-                                let gp_m = mb_module_start(0 as u32) as ptr[u8];
+                                let gp_m = lp_plat_module_start(0 as u32) as ptr[u8];
                                 let gp_cfg = model_config(gp_m);
                                 let gp_w = scratch_bytes as ptr[f32];
                                 let gp_a = activation_buf as ptr[f32];
@@ -3248,7 +3248,7 @@ fn main() {
                                 clear_kv_cache(kv_k_buf, kv_v_buf,
                                    active_cfg.n_layer, active_cfg.max_seq,
                                    active_cfg.n_head_kv * active_cfg.head_dim);
-                                lp_rand_seed(ticks() + 1 as u32);
+                                lp_rand_seed(lp_plat_ticks() + 1 as u32);
 
                                 /* Run batched prompt prefill */
                                 var gp_ok: i32 = 1;
@@ -3305,10 +3305,10 @@ fn main() {
                             }
                         }
                 } else if (starts_with(text, "chat")) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
-                        let cm = mb_module_start(0 as u32) as ptr[u8];
+                        let cm = lp_plat_module_start(0 as u32) as ptr[u8];
                         let cc = model_config(cm);
                         if (tok_count < 0) {
                             tok_count = build_tok_offsets(cm, tok_table, cc.vocab_size);
@@ -3352,14 +3352,14 @@ fn main() {
                                            active_cfg.n_layer, active_cfg.max_seq,
                                            active_cfg.n_head_kv * active_cfg.head_dim);
                             println("  prefilling {chat_len} system tokens...");
-                            let cp0 = ticks();
+                            let cp0 = lp_plat_ticks();
                             if (prefill_tokens(cm, cc, chat_ids, 0 as i64,
                                                chat_len, scratch_bytes as ptr[f32],
                                                kv_k_buf, kv_v_buf,
                                                rope_freqs, logits_buf)) {
                                 chat_kv_len = chat_len;
                                 chat_mode = 1;
-                                let cp1 = ticks();
+                                let cp1 = lp_plat_ticks();
                                 println("  system prefill: {(cp1 - cp0) as i64 * 10} ms");
                                 println("  chat mode; /help commands, /exit leaves, Ctrl+C cancels");
                             } else {
@@ -3369,20 +3369,20 @@ fn main() {
                     }
                 } else if (starts_with(text, "keytest")) {
                     println("  press keys for 5 seconds...");
-                    let kt0 = ticks();
+                    let kt0 = lp_plat_ticks();
                     var kcount: i64 = 0;
-                    while ((ticks() - kt0) < 500 as u32) {
-                        kbd_poll();
-                        let kev = kbd_read();
+                    while ((lp_plat_ticks() - kt0) < 500 as u32) {
+                        lp_plat_input_poll();
+                        let kev = lp_plat_input_read();
                         if (kev != 0) {
                             println("  event {kev}");
                             kcount = kcount + 1;
                         }
-                        cpu_hlt();
+                        lp_plat_halt();
                     }
                     println("  keytest: {kcount} event(s)");
                 } else if (starts_with(text, "ask")) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
                         let q_buf = alloc([u8; 256]) as ptr[u8];
@@ -3390,7 +3390,7 @@ fn main() {
                         if (q_end < 0) {
                             println("  usage: ask \"question\" [n]");
                         } else {
-                            let q_m = mb_module_start(0 as u32) as ptr[u8];
+                            let q_m = lp_plat_module_start(0 as u32) as ptr[u8];
                             let q_cfg = model_config(q_m);
                             if (tok_count < 0) {
                                 tok_count = build_tok_offsets(q_m, tok_table,
@@ -3481,7 +3481,7 @@ fn main() {
                                     else { print("  prefix built; "); }
                                     println("prefilling {qp - q_start} tokens (Ctrl+C cancels)...");
                                     print("  ");
-                                    let qt0 = ticks();
+                                    let qt0 = lp_plat_ticks();
                                     var q_ok: i32 = 1;
                                     var q_pos: i64 = q_start;
                                     if (!prefill_tokens(q_m, q_cfg, q_ids,
@@ -3494,7 +3494,7 @@ fn main() {
                                         q_pos = qp;
                                     }
                                     print(".");
-                                    let qt1 = ticks();
+                                    let qt1 = lp_plat_ticks();
                                     println("");
                                     println("  prefill: {(qt1 - qt0) as i64 * 10} ms");
                                     if (q_ok == 1 && !q_reuse) {
@@ -3503,7 +3503,7 @@ fn main() {
                                     }
                                     if (q_ok == 1) {
                                         let q_eos = model_eos(q_m);
-                                        let qt2 = ticks();
+                                        let qt2 = lp_plat_ticks();
                                         print("  ");
                                         var q_g: i64 = 0;
                                         while (q_g < q_n && q_pos < q_cfg.max_seq) {
@@ -3529,7 +3529,7 @@ fn main() {
                                             }
                                             q_pos = q_pos + 1;
                                         }
-                                        let qt3 = ticks();
+                                        let qt3 = lp_plat_ticks();
                                         println("");
                                         println("  answer: {(qt3 - qt2) as i64 * 10} ms for {q_g} token(s)");
                                     } else {
@@ -3554,10 +3554,10 @@ fn main() {
                 } else if (starts_with(text, "mem")) {
                     println("  heap: {lp_heap_used()} / {lp_heap_max()} bytes");
                 } else if (starts_with(text, "selftest")) {
-                    if (mb_module_count() == 0 as u32) {
+                    if (lp_plat_module_count() == 0 as u32) {
                         println("  no module loaded");
                     } else {
-                        let tm = mb_module_start(0 as u32) as ptr[u8];
+                        let tm = lp_plat_module_start(0 as u32) as ptr[u8];
                         let tc2 = model_config(tm);
                         ask_prefix_valid = 0;
                         let tw = scratch_bytes as ptr[f32];
@@ -3645,9 +3645,9 @@ fn main() {
                                    active_cfg.n_head_kv * active_cfg.head_dim);
                     println("  kv cache reset");
                 } else if (starts_with(text, "reboot")) {
-                    lp_reboot();
+                    lp_plat_reboot();
                 } else if (starts_with(text, "poweroff")) {
-                    lp_poweroff();
+                    lp_plat_poweroff();
                 } else if (starts_with(text, "filetest")) {
                     let fs = file_size("test.bin");
                     let fbuf = alloc([u8; 4]);
@@ -3655,7 +3655,7 @@ fn main() {
                     let wr = write_file("test.bin", fbuf, 4);
                     println("  file_size={fs} read={rd} write={wr}");
                 } else if (starts_with(text, "clear")) {
-                    lp_clear_screen();
+                    lp_plat_clear_screen();
                 } else if (starts_with(text, "help ")) {
                     let topic = read_str(line_buf, 5, line_len - 5);
                     if (starts_with(topic, "generate")) {
@@ -3699,15 +3699,15 @@ fn main() {
                 line_len = 0;
                 cursor = 0;
                 history_pos = history_n;
-                vga_set_color(0x0A as u8);
+                lp_plat_set_color(0x0A as u8);
                 print_prompt(chat_mode, chat_len, active_cfg.max_seq);
-                vga_set_color(0x0F as u8);
+                lp_plat_set_color(0x0F as u8);
             } else if (ch == 16 as u8) {      /* serial Ctrl+P: page up */
-                vga_page_up();
+                lp_plat_page_up();
             } else if (ch == 14 as u8) {      /* serial Ctrl+N: page down */
-                vga_page_down();
+                lp_plat_page_down();
             } else if (ch == 12 as u8) {      /* serial Ctrl+L */
-                lp_clear_screen();
+                lp_plat_clear_screen();
                 line_redraw(line_buf, line_len, cursor, line_len, chat_mode, chat_len, active_cfg.max_seq);
             } else if (ch == 9 as u8) {       /* serial Tab */
                 let old_len = line_len;
