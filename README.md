@@ -446,8 +446,9 @@ These are the boundaries of the current implementation, not a wish list; see
 - **Q&A.** `ask` uses SmolLM2 Instruct ChatML (`<|im_start|>` /
   `<|im_end|>`) and requires an Instruct GGUF. Prefill is ~37 tokens and
   prints progress; Ctrl+C cancels. Ordinary REPL typing is unaffected once
-  `ask` returns. `chat` starts a multi-turn ChatML mode with `/exit` and
-  Ctrl+C cancellation; it keeps conversation KV state. PageUp/PageDown or
+  `ask` returns. `chat` starts a multi-turn ChatML mode with `/exit`, `/new`,
+  `/ctx`, `/help`, and Ctrl+C cancellation; it keeps conversation KV state
+  and drops the oldest turn when the context fills. PageUp/PageDown or
   Ctrl+P/Ctrl+N review up to eight previous VGA pages. The system/user ChatML
   prefix is cached after the first ask:
   QEMU baseline after batched prefill/SSE2 was ~58 s for the first prefill and

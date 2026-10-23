@@ -8,6 +8,8 @@
   raw `lepton>` REPL.
 - Added an eight-page VGA scrollback ring with PageUp/PageDown and
   Ctrl+P/Ctrl+N; typing returns to the live screen.
+- Added rolling chat memory: track turns, drop the oldest turn when context
+  fills, rebuild the retained KV, and add `/new`, `/ctx`, and `/help`.
 
 ## v0.3.1 — 2026-10-22
 

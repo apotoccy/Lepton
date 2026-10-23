@@ -118,8 +118,10 @@ cursor editing, eight-entry history, tab completion, and Ctrl+C/Ctrl+L.
   assistant header. Progress/timing are printed; Ctrl+C cancels.
 - `chat` — multi-turn ChatML mode. The system prefix is built once, each
   turn appends user/assistant tokens to the KV cache, `ctx N/256` reports
-  usage, `/exit` leaves, and Ctrl+C cancels. The raw `lepton>` REPL remains
-  available outside chat.
+  usage, `/new` resets the conversation, `/ctx` shows turn usage, `/help`
+  lists chat commands, `/exit` leaves, and Ctrl+C cancels. When the context
+  fills, the oldest turn is dropped and the retained turns are re-prefilled.
+  The raw `lepton>` REPL remains available outside chat.
 - **PageUp/PageDown** or **Ctrl+P/Ctrl+N** — review the last eight VGA pages;
   any normal key returns to the live screen.
 - `keytest` — print raw keyboard events for five seconds.
