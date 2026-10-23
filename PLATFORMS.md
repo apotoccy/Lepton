@@ -21,6 +21,8 @@ kernel/arch/uefi64/        UEFI64 port (next phase)
 | `make run-uefi64` | Hello milestone | Boots the EFI hello app under OVMF |
 | `make uefi64-shell` | Shell milestone | GOP console + ConIn platform shell |
 | `make run-uefi64-shell` | Shell milestone | Boots the platform shell under OVMF |
+| `make uefi64-kernel` | Inference milestone | 64-bit Lepton core + embedded Q4_0 model |
+| `make run-uefi64-kernel` | Inference milestone | Boots the 64-bit kernel under OVMF |
 | `make iso` | Stable | BIOS GRUB ISO |
 
 `kernel64-check` is not a bootable UEFI kernel yet. It currently exposes
@@ -32,7 +34,12 @@ reports the UEFI memory map, and locates the Graphics Output Protocol.
 The UEFI64 platform shell adds a framebuffer console with an embedded 8x16
 font, UEFI ConIn keyboard input, line editing/history, a 16 MB UEFI-backed
 heap, an RTC command, and `help`/`mem`/`config`/`clear`/`echo`/`quit`.
-It does not enter the Lepton kernel or load a model yet.
+
+The UEFI64 Lepton kernel milestone links the shared kernel core with the UEFI
+platform, copies an embedded Q4_0 TinyStories model into low allocated memory,
+and runs inference. Under OVMF, `fwdpos 0 1` predicts token 9038 (` Once`).
+The model is embedded for this milestone; loading it from the ESP and running
+SmolLM2-135M are next.
 
 ## Platform contract
 

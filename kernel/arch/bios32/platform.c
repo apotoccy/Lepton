@@ -3,6 +3,7 @@
 
 extern void serial_init(void);
 extern void vga_init(void);
+extern void vga_putc(char c);
 extern void interrupts_init(void);
 extern void cpu_hlt(void);
 extern uint32_t ticks(void);
@@ -25,6 +26,7 @@ extern void lp_poweroff(void);
 
 void lp_plat_serial_init(void) { serial_init(); }
 void lp_plat_console_init(void) { vga_init(); }
+void lp_plat_putc(char c) { vga_putc(c); }
 void lp_plat_interrupts_init(void) { interrupts_init(); }
 void lp_plat_halt(void) { cpu_hlt(); }
 uint32_t lp_plat_ticks(void) { return ticks(); }

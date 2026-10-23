@@ -53,6 +53,9 @@ jobs:
       - name: UEFI64 platform shell build
         run: make uefi64-shell
 
+      - name: UEFI64 Lepton kernel build
+        run: make uefi64-kernel
+
       - name: GGUF fixture references
         run: |
           mkdir -p build

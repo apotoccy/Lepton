@@ -15,8 +15,9 @@ Compiler and OS for edge AI inference, from 32-bit PCs to modern devices.
 - **S9:** baseline recorded; 908.75 ms/token for `bench 8`, first Ask prefill
   16.62 s, cached second prefill 6.18 s, answer 6.42 s.
 - **Platforms:** shared core plus BIOS32 shim; 64-bit compile check wired.
-  A UEFI64 hello app and GOP/ConIn platform shell boot under OVMF;
-  kernel/model integration and the hybrid ISO are next.
+  A UEFI64 hello app, GOP/ConIn platform shell, and 64-bit Lepton kernel with
+  embedded Q4_0 inference boot under OVMF. Model loading from the ESP,
+  SmolLM2-135M, and the hybrid ISO are next.
 - **Next focus:** UEFI64 boot, then hybrid BIOS/UEFI packaging.
 
 ## Verification checklist

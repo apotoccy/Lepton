@@ -20,6 +20,7 @@ typedef struct {
 
 void lp_plat_serial_init(void);
 void lp_plat_console_init(void);
+void lp_plat_putc(char c);
 void lp_plat_interrupts_init(void);
 void lp_plat_halt(void);
 uint32_t lp_plat_ticks(void);

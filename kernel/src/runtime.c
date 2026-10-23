@@ -198,25 +198,25 @@ void lp_alloc_release(long long mark) {
 //    return p;
 //}
 
+extern void lp_plat_putc(char c);
+
 void lp_print(const char *s) {
     while (*s) {
         char c = *s++;
         if (c == '\n') {
-            serial_putc('\r');  /* serial needs CRLF */
+            serial_putc('\r');
             serial_putc('\n');
-            vga_putc('\n');
+            lp_plat_putc('\n');
         } else {
             serial_putc(c);
-            vga_putc(c);
+            lp_plat_putc(c);
         }
     }
 }
 
 void lp_println(const char *s) {
     lp_print(s);
-    serial_putc('\r');
-    serial_putc('\n');
-    vga_putc('\n');
+    lp_print("\n");
 }
 
 void lp_cursor_left(void) {

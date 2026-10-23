@@ -2,6 +2,12 @@
 #include "uefi.h"
 #include "font8x16.h"
 
+#ifdef UEFI_KERNEL
+extern const unsigned char model_blob_start[];
+extern const unsigned char model_blob_end[];
+extern void main(void);
+#endif
+
 static EFI_SYSTEM_TABLE *ST;
 static EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
 static UINT8 *fb;
@@ -10,6 +16,7 @@ static UINT32 con_cols, con_rows, con_x, con_y;
 static UINT32 fg_color = 0x00FFFFFF;
 static UINT8 *heap_base;
 static UINTN heap_size, heap_used;
+static int mirror_serial = 1;
 static UINTN map_count, map_pages;
 static UINTN map_desc_size;
 
@@ -69,7 +76,7 @@ static void con_scroll(void) {
     (void)tmp;
 }
 static void con_putc(char c) {
-    serial_putc(c);
+    if (mirror_serial) serial_putc(c);
     if (c == '\n') { con_x = 0; con_y++; }
     else if (c == '\r') { con_x = 0; }
     else if (c == '\b') {
@@ -279,6 +286,117 @@ static void run_command(void) {
     line_x = con_x; line_y = con_y;
 }
 
+
+/* Runtime compatibility stubs; UEFI uses lp_plat_* instead. */
+void vga_cursor_left(void) { }
+void vga_cursor_right(void) { }
+void vga_clear(void) { con_clear(); }
+
+/* ---- Lepton platform contract ------------------------------------------ */
+static UINT8 *low_base;
+static UINTN low_size, model_size;
+static UINT32 platform_ticks;
+
+static UINT32 time_ms(void) {
+    EFI_RUNTIME_SERVICES *rt = (EFI_RUNTIME_SERVICES *)ST->RuntimeServices;
+    EFI_TIME t;
+    if (!rt || !rt->GetTime || (rt->GetTime(&t, 0) & EFI_ERROR_MASK)) return platform_ticks;
+    return (((UINT32)t.Hour * 60 + t.Minute) * 60 + t.Second) * 1000
+           + t.Nanosecond / 1000000;
+}
+
+#ifdef UEFI_KERNEL
+static EFI_STATUS model_setup(void) {
+    EFI_PHYSICAL_ADDRESS addr;
+    void *pool = 0;
+    EFI_STATUS s;
+    UINTN want = 64 * 1024 * 1024;
+    model_size = (UINTN)(model_blob_end - model_blob_start);
+    for (;;) {
+        addr = 0xFFFFFFFFULL;
+        pool = 0;
+        s = ST->BootServices->AllocatePool(4, want, &pool);
+        addr = (EFI_PHYSICAL_ADDRESS)(UINTN)pool;
+        if (!(s & EFI_ERROR_MASK) && addr > 0 && addr + want < 0xFFFFFFFFULL) break;
+        want /= 2;
+        if (want < 32 * 1024 * 1024) return 1;
+    }
+    low_base = (UINT8 *)(UINTN)addr;
+    low_size = want;
+    if (model_size > want / 2) return 1;
+    for (UINTN i = 0; i < model_size; i++) low_base[i] = model_blob_start[i];
+    return 0;
+}
+#endif
+
+void lp_plat_serial_init(void) { serial_init(); }
+void lp_plat_console_init(void) { con_clear(); }
+void lp_plat_putc(char c) { con_putc(c); }
+void lp_plat_interrupts_init(void) { }
+void lp_plat_halt(void) { ST->BootServices->Stall(1000); }
+UINT32 lp_plat_ticks(void) { platform_ticks = time_ms(); return platform_ticks; }
+UINT32 lp_plat_input_read(void) { return input_read(); }
+void lp_plat_input_poll(void) { }
+UINT32 lp_plat_input_cancel_pending(void) { return 0; }
+void lp_plat_cursor_left(void) { if (con_x > 0) con_x--; }
+void lp_plat_cursor_right(void) { con_x++; }
+void lp_plat_clear_screen(void) { con_clear(); }
+void lp_plat_set_color(uint8_t c) {
+    if (c == 0x0A) fg_color = 0x0000FF00;
+    else if (c == 0x0C) fg_color = 0x00FF0000;
+    else fg_color = 0x00FFFFFF;
+}
+void lp_plat_page_up(void) { }
+void lp_plat_page_down(void) { }
+UINT32 lp_plat_module_count(void) {
+#ifdef UEFI_KERNEL
+    return low_base ? 1 : 0;
+#else
+    return 0;
+#endif
+}
+UINT32 lp_plat_module_start(uint32_t idx) {
+#ifdef UEFI_KERNEL
+    (void)idx;
+    return (UINT32)(UINTN)low_base;
+#else
+    (void)idx; return 0;
+#endif
+}
+UINT32 lp_plat_module_size(uint32_t idx) {
+#ifdef UEFI_KERNEL
+    (void)idx;
+    return (UINT32)model_size;
+#else
+    (void)idx; return 0;
+#endif
+}
+UINT32 lp_plat_module_end(uint32_t idx) {
+#ifdef UEFI_KERNEL
+    (void)idx;
+    return (UINT32)((UINTN)low_base + model_size);
+#else
+    (void)idx; return 0;
+#endif
+}
+UINT32 lp_plat_memory_end(void) {
+#ifdef UEFI_KERNEL
+    return (UINT32)((UINTN)low_base + low_size);
+#else
+    return 0;
+#endif
+}
+void lp_plat_reboot(void) {
+    EFI_RUNTIME_SERVICES *rt = (EFI_RUNTIME_SERVICES *)ST->RuntimeServices;
+    typedef void (EFIAPI *reset_fn)(UINT32, EFI_STATUS, UINTN, CHAR16 *);
+    if (rt && rt->ResetSystem) ((reset_fn)rt->ResetSystem)(0, 0, 0, 0);
+}
+void lp_plat_poweroff(void) {
+    EFI_RUNTIME_SERVICES *rt = (EFI_RUNTIME_SERVICES *)ST->RuntimeServices;
+    typedef void (EFIAPI *reset_fn)(UINT32, EFI_STATUS, UINTN, CHAR16 *);
+    if (rt && rt->ResetSystem) ((reset_fn)rt->ResetSystem)(2, 0, 0, 0);
+}
+
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st) {
     EFI_STATUS s;
     EFI_GUID gop_guid = { 0x9042A9DE, 0x23DC, 0x4A38,
@@ -319,6 +437,16 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st) {
         }
     }
 
+#ifdef UEFI_KERNEL
+    mirror_serial = 0;
+    if (model_setup() != 0) {
+        con_puts("model setup failed\r\n");
+        return 1;
+    }
+    con_clear();
+    main();
+    return EFI_SUCCESS;
+#else
     con_puts("Lepton UEFI64 platform shell\r\n");
     con_puts("--------------------------------\r\n");
     show_config();
@@ -378,4 +506,5 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st) {
             line_len++; line_cursor++; line_redraw();
         }
     }
+#endif
 }
