@@ -35,11 +35,14 @@ The UEFI64 platform shell adds a framebuffer console with an embedded 8x16
 font, UEFI ConIn keyboard input, line editing/history, a 16 MB UEFI-backed
 heap, an RTC command, and `help`/`mem`/`config`/`clear`/`echo`/`quit`.
 
-The UEFI64 Lepton kernel milestone links the shared kernel core with the UEFI
-platform, copies an embedded Q4_0 TinyStories model into low allocated memory,
-and runs inference. Under OVMF, `fwdpos 0 1` predicts token 9038 (` Once`).
-The model is embedded for this milestone; loading it from the ESP and running
-SmolLM2-135M are next.
+The UEFI64 Lepton kernel links the shared kernel core with the UEFI platform,
+loads a Q4_0 GGUF from the EFI System Partition, copies it into low allocated
+memory, and runs inference. Under OVMF, SmolLM2-135M-Instruct Q4_0 reports
+`fwdpos 0 1` as token 28 (`,`).
+
+The model path is `\models\smollm2-instruct-q4_0.gguf`; the FAT image is
+built by `run-uefi64-kernel`. Loading a model no longer requires rebuilding
+the EFI binary.
 
 ## Platform contract
 

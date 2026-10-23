@@ -3,12 +3,11 @@
 #include "font8x16.h"
 
 #ifdef UEFI_KERNEL
-extern const unsigned char model_blob_start[];
-extern const unsigned char model_blob_end[];
 extern void main(void);
 #endif
 
 static EFI_SYSTEM_TABLE *ST;
+static EFI_HANDLE g_image;
 static EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
 static UINT8 *fb;
 static UINT32 fb_width, fb_height, fb_pitch, fb_format;
@@ -306,27 +305,72 @@ static UINT32 time_ms(void) {
 }
 
 #ifdef UEFI_KERNEL
-static EFI_STATUS model_setup(void) {
-    EFI_PHYSICAL_ADDRESS addr;
-    void *pool = 0;
+
+static int wstr_eq(const CHAR16 *a, const CHAR16 *b) {
+    while (*a && *b) { if (*a != *b) return 0; a++; b++; }
+    return *a == *b;
+}
+static void wstr_copy(CHAR16 *d, const char *s) {
+    while (*s) { *d++ = (CHAR16)(unsigned char)*s++; }
+    *d = 0;
+}
+static EFI_STATUS open_model(EFI_FILE_PROTOCOL **out, UINT64 *size) {
+    EFI_GUID loaded_guid = { 0x5B1B31A1, 0x9562, 0x11D2,
+                             { 0x8E, 0x3F, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B } };
+    EFI_GUID fs_guid = { 0x964E5B22, 0x6459, 0x11D2,
+                         { 0x8E, 0x39, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B } };
+    typedef EFI_STATUS (EFIAPI *handle_fn)(EFI_HANDLE, EFI_GUID *, void **);
+    handle_fn hp = (handle_fn)ST->BootServices->HandleProtocol;
+    EFI_LOADED_IMAGE_PROTOCOL *li = 0;
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs = 0;
+    EFI_FILE_PROTOCOL *root = 0, *file = 0;
     EFI_STATUS s;
-    UINTN want = 64 * 1024 * 1024;
-    model_size = (UINTN)(model_blob_end - model_blob_start);
-    for (;;) {
-        addr = 0xFFFFFFFFULL;
-        pool = 0;
-        s = ST->BootServices->AllocatePool(4, want, &pool);
-        addr = (EFI_PHYSICAL_ADDRESS)(UINTN)pool;
-        if (!(s & EFI_ERROR_MASK) && addr > 0 && addr + want < 0xFFFFFFFFULL) break;
-        want /= 2;
-        if (want < 32 * 1024 * 1024) return 1;
+    CHAR16 path[128];
+    s = hp(g_image, &loaded_guid, (void **)&li);
+    if ((s & EFI_ERROR_MASK) || !li) return s;
+    s = hp(li->DeviceHandle, &fs_guid, (void **)&fs);
+    if ((s & EFI_ERROR_MASK) || !fs) return s;
+    s = fs->OpenVolume(fs, &root);
+    if ((s & EFI_ERROR_MASK) || !root) return s;
+    wstr_copy(path, "\\models\\smollm2-instruct-q4_0.gguf");
+    s = root->Open(root, &file, path, 1, 0);
+    if (s & EFI_ERROR_MASK) {
+        wstr_copy(path, "\\models\\tinystories.gguf");
+        s = root->Open(root, &file, path, 1, 0);
     }
-    low_base = (UINT8 *)(UINTN)addr;
-    low_size = want;
-    if (model_size > want / 2) return 1;
-    for (UINTN i = 0; i < model_size; i++) low_base[i] = model_blob_start[i];
+    if (s & EFI_ERROR_MASK) return s;
+    s = file->SetPosition(file, 0xFFFFFFFFFFFFFFFFULL);
+    if (s & EFI_ERROR_MASK) { file->Close(file); return s; }
+    s = file->GetPosition(file, size);
+    if (s & EFI_ERROR_MASK) { file->Close(file); return s; }
+    s = file->SetPosition(file, 0);
+    if (s & EFI_ERROR_MASK) { file->Close(file); return s; }
+    *out = file;
     return 0;
 }
+
+static EFI_STATUS model_setup(void) {
+    EFI_FILE_PROTOCOL *file = 0;
+    UINT64 fsize = 0;
+    UINTN want;
+    void *pool = 0;
+    EFI_STATUS s;
+    s = open_model(&file, &fsize);
+    if (s & EFI_ERROR_MASK) return s;
+    if (fsize == 0 || fsize > 256ULL * 1024 * 1024) { file->Close(file); return 1; }
+    model_size = (UINTN)fsize;
+    want = ((UINTN)fsize + 66ULL * 1024 * 1024 + 0xFFFFF) & ~(UINTN)0xFFFFF;
+    s = ST->BootServices->AllocatePool(4, want, &pool);
+    if ((s & EFI_ERROR_MASK) || !pool) { file->Close(file); return 1; }
+    low_base = (UINT8 *)pool;
+    low_size = want;
+    UINTN got = (UINTN)fsize;
+    s = file->Read(file, &got, low_base);
+    file->Close(file);
+    if ((s & EFI_ERROR_MASK) || got != model_size) return 1;
+    return (UINTN)low_base + low_size < 0xFFFFFFFFULL ? 0 : 1;
+}
+
 #endif
 
 void lp_plat_serial_init(void) { serial_init(); }
@@ -404,7 +448,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st) {
     static UINT8 map_buf[16384];
     UINTN map_size = sizeof(map_buf), map_key = 0;
     UINT32 map_ver = 0;
-    (void)image;
+    g_image = image;
     ST = st;
     serial_init();
     serial_puts("Lepton UEFI64 shell\n");

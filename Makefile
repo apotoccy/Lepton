@@ -40,8 +40,7 @@ UEFI64_KERNEL_C   := $(KERNEL64_OUT)/kernel.c
 UEFI64_KERNEL_OBJ := $(KERNEL64_OUT)/kernel-uefi.o
 UEFI64_KERNEL_RT  := $(KERNEL64_OUT)/runtime-uefi.o
 UEFI64_KERNEL_SH  := $(UEFI64_OUT)/kernel-shell.o
-UEFI64_MODEL_OBJ  := $(UEFI64_OUT)/model-blob.o
-UEFI_MODEL        ?= models/tinystories.gguf
+UEFI_MODEL        ?= models/smollm2-instruct-q4_0.gguf
 UEFI64_KERNEL_DISK := $(UEFI64_OUT)/kernel-disk.img
 UEFI64_ESP    := $(UEFI64_OUT)/esp.img
 UEFI64_DISK   := $(UEFI64_OUT)/disk.img
@@ -165,39 +164,31 @@ $(UEFI64_KERNEL_SH): kernel/arch/uefi64/shell.c kernel/arch/uefi64/uefi.h kernel
 	    -fno-ident -ffunction-sections -fdata-sections -DUEFI_KERNEL \
 	    -Wall -Wextra -Wno-unused-parameter -c $< -o $@
 
-$(UEFI64_MODEL_OBJ): $(UEFI_MODEL)
-	@mkdir -p $(UEFI64_OUT)
-	objcopy -I binary -O elf64-x86-64 -B i386:x86-64 \
-	    --rename-section .data=.rodata,alloc,load,readonly,data,contents \
-	    --redefine-sym _binary_$(subst .,_,$(subst /,_,$(UEFI_MODEL)))_start=model_blob_start \
-	    --redefine-sym _binary_$(subst .,_,$(subst /,_,$(UEFI_MODEL)))_end=model_blob_end \
-	    --redefine-sym _binary_$(subst .,_,$(subst /,_,$(UEFI_MODEL)))_size=model_blob_size \
-	    $< $@
-
-$(UEFI64_KERNEL): $(UEFI64_KERNEL_OBJ) $(UEFI64_KERNEL_RT) $(UEFI64_KERNEL_SH) $(UEFI64_MODEL_OBJ)
+$(UEFI64_KERNEL): $(UEFI64_KERNEL_OBJ) $(UEFI64_KERNEL_RT) $(UEFI64_KERNEL_SH)
 	ld -m i386pep -nostdlib --subsystem 10 --entry efi_main \
 	    --image-base 0x10000000 -o $@ $(UEFI64_KERNEL_OBJ) $(UEFI64_KERNEL_RT) \
-	    $(UEFI64_KERNEL_SH) $(UEFI64_MODEL_OBJ)
+	    $(UEFI64_KERNEL_SH)
 	objcopy --remove-section .comment --remove-section .note.gnu.property $@
 	@echo "uefi64 kernel: $@"
 
 uefi64-kernel: $(UEFI64_KERNEL)
 
-$(UEFI64_KERNEL_DISK): $(UEFI64_KERNEL)
-	@mkdir -p $(UEFI64_OUT)/kernel-esp/EFI/BOOT
+$(UEFI64_KERNEL_DISK): $(UEFI64_KERNEL) $(UEFI_MODEL)
+	@mkdir -p $(UEFI64_OUT)/kernel-esp/EFI/BOOT $(UEFI64_OUT)/kernel-esp/models
 	cp $(UEFI64_KERNEL) $(UEFI64_OUT)/kernel-esp/EFI/BOOT/BOOTX64.EFI
+	cp $(UEFI_MODEL) $(UEFI64_OUT)/kernel-esp/models/smollm2-instruct-q4_0.gguf
 	rm -f $(UEFI64_OUT)/kernel-esp.img $@
-	dd if=/dev/zero of=$(UEFI64_OUT)/kernel-esp.img bs=1M count=64 status=none
+	dd if=/dev/zero of=$(UEFI64_OUT)/kernel-esp.img bs=1M count=160 status=none
 	mkfs.fat -F16 $(UEFI64_OUT)/kernel-esp.img >/dev/null
-	mcopy -i $(UEFI64_OUT)/kernel-esp.img -s $(UEFI64_OUT)/kernel-esp/EFI ::/
-	truncate -s 96M $@
-	parted -s $@ mklabel msdos mkpart primary fat16 1MiB 95MiB set 1 boot on >/dev/null
+	mcopy -i $(UEFI64_OUT)/kernel-esp.img -s $(UEFI64_OUT)/kernel-esp/EFI $(UEFI64_OUT)/kernel-esp/models ::/
+	truncate -s 192M $@
+	parted -s $@ mklabel msdos mkpart primary fat16 1MiB 191MiB set 1 boot on >/dev/null
 	sfdisk --part-type $@ 1 ef >/dev/null
 	dd if=$(UEFI64_OUT)/kernel-esp.img of=$@ bs=1M seek=1 conv=notrunc status=none
 
 run-uefi64-kernel: $(UEFI64_KERNEL_DISK)
 	$(QEMU64) -bios $(OVMF) -drive format=raw,file=$(UEFI64_KERNEL_DISK) \
-	    -serial stdio -display none -no-reboot -m 512
+	    -serial stdio -display none -no-reboot -m 1024
 
 $(UEFI64_SHELL_OBJ): kernel/arch/uefi64/shell.c kernel/arch/uefi64/uefi.h kernel/arch/uefi64/font8x16.h
 	@mkdir -p $(UEFI64_OUT)

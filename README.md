@@ -42,8 +42,8 @@ make uefi64          # minimal UEFI64 hello application
 make run-uefi64      # boot hello under OVMF
 make uefi64-shell    # GOP/ConIn UEFI64 platform shell
 make run-uefi64-shell # boot the shell under OVMF
-make uefi64-kernel   # 64-bit Lepton core + embedded Q4_0 model
-make run-uefi64-kernel # boot the 64-bit kernel under OVMF
+make uefi64-kernel   # 64-bit Lepton core
+make run-uefi64-kernel # boot it with SmolLM2 Q4_0 from the ESP
 ```
 
 ## Key features

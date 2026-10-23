@@ -206,4 +206,51 @@ typedef struct {
     void *ResetSystem;
 } EFI_RUNTIME_SERVICES;
 
+typedef struct {
+    UINT32 Revision;
+    EFI_HANDLE ParentHandle;
+    EFI_SYSTEM_TABLE *SystemTable;
+    EFI_HANDLE DeviceHandle;
+    void *FilePath;
+    void *Reserved;
+    UINT32 LoadOptionsSize;
+    void *LoadOptions;
+    void *ImageBase;
+    UINT64 ImageSize;
+    UINT32 ImageCodeType;
+    UINT32 ImageDataType;
+    void *Unload;
+} EFI_LOADED_IMAGE_PROTOCOL;
+
+typedef struct EFI_FILE_PROTOCOL {
+    UINT64 Revision;
+    EFI_STATUS (EFIAPI *Open)(struct EFI_FILE_PROTOCOL *This,
+                              struct EFI_FILE_PROTOCOL **NewHandle,
+                              CHAR16 *FileName, UINT64 OpenMode,
+                              UINT64 Attributes);
+    EFI_STATUS (EFIAPI *Close)(struct EFI_FILE_PROTOCOL *This);
+    EFI_STATUS (EFIAPI *Delete)(struct EFI_FILE_PROTOCOL *This);
+    EFI_STATUS (EFIAPI *Read)(struct EFI_FILE_PROTOCOL *This,
+                              UINTN *BufferSize, void *Buffer);
+    EFI_STATUS (EFIAPI *Write)(struct EFI_FILE_PROTOCOL *This,
+                               UINTN *BufferSize, void *Buffer);
+    EFI_STATUS (EFIAPI *GetPosition)(struct EFI_FILE_PROTOCOL *This,
+                                     UINT64 *Position);
+    EFI_STATUS (EFIAPI *SetPosition)(struct EFI_FILE_PROTOCOL *This,
+                                     UINT64 Position);
+    EFI_STATUS (EFIAPI *GetInfo)(struct EFI_FILE_PROTOCOL *This,
+                                 EFI_GUID *InformationType,
+                                 UINTN *BufferSize, void *Buffer);
+    EFI_STATUS (EFIAPI *SetInfo)(struct EFI_FILE_PROTOCOL *This,
+                                 EFI_GUID *InformationType,
+                                 UINTN *BufferSize, void *Buffer);
+    EFI_STATUS (EFIAPI *Flush)(struct EFI_FILE_PROTOCOL *This);
+} EFI_FILE_PROTOCOL;
+
+typedef struct {
+    UINT64 Revision;
+    EFI_STATUS (EFIAPI *OpenVolume)(void *This,
+                                    EFI_FILE_PROTOCOL **Root);
+} EFI_SIMPLE_FILE_SYSTEM_PROTOCOL;
+
 #endif

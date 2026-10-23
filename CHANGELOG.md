@@ -11,8 +11,9 @@
 - Added a UEFI64 platform shell with a GOP 8x16 console, ConIn line editing
   and history, a 16 MB heap, RTC time, and `help`/`mem`/`config`/`time`/
   `alloc`/`clear`/`echo`/`quit` commands.
-- Linked the shared Lepton kernel core as a 64-bit UEFI application with an
-  embedded Q4_0 TinyStories model. OVMF `fwdpos 0 1` returns 9038 (` Once`).
+- Linked the shared Lepton kernel core as a 64-bit UEFI application.
+- Load a Q4_0 GGUF from the EFI System Partition instead of embedding it.
+  OVMF with SmolLM2-135M-Instruct Q4_0 returns `fwdpos 0 1` = 28 (`,`).
 
 ## v0.4.0 — 2026-10-23
 
