@@ -1,20 +1,16 @@
-# Lepton v0.4.0 Release Validation
+# Lepton v0.5.0 Release Validation
 
 Date: 2026-10-23
 
 ## Release contents
 
-- Multi-turn ChatML `chat` mode with a persistent system prefix.
-- Rolling conversation memory: oldest-turn eviction, KV rebuild, `/new`,
-  `/ctx`, and `/help`.
-- Context-aware `you [used/max]>` prompt with prefill/answer timing, token
-  count, and heap usage.
-- Eight-page VGA scrollback with PageUp/PageDown and Ctrl+P/Ctrl+N.
-- Mixed K-quant compatibility guard: Q4_K_M and other mixed K-quant models
-  are refused instead of producing corrupt text.
-- Q4_0 and Q8_0 Instruct inference remain supported.
-- Per-function annotations across `kernel/src/kernel.lp` and `leptonc.py`.
-- S9 baseline and the reverted batched-Q4 experiment documented.
+- Shared kernel core with a BIOS32 platform shim.
+- UEFI64 hello application and GOP/ConIn platform shell.
+- 64-bit Lepton kernel linked against the UEFI platform.
+- GGUF model loading from the EFI System Partition.
+- UEFI64 `ask` and `chat`, including context status and Ctrl+C cancellation.
+- BIOS32 + UEFI64 hybrid ISO with two El Torito entries.
+- Retained v0.4.0 features: rolling chat memory, VGA scrollback, mixed-K guard.
 
 ## Validation matrix
 
@@ -23,55 +19,71 @@ Date: 2026-10-23
 | `make test` | 134 passed, 0 failed |
 | `make test-sse` | 134 passed, 0 failed |
 | `make all` | 64-bit and 32-bit userland builds pass |
-| `make -B kernel` | Builds `build/kernel/kernel.elf` |
-| `make iso MODEL=models/smollm2-instruct-q4_0.gguf` | Builds 100 MB ISO |
+| `make kernel32` | BIOS32 kernel builds |
+| `make kernel64-check` | 64-bit core compiles |
+| `make uefi64` | UEFI hello application builds |
+| `make uefi64-shell` | UEFI platform shell builds |
+| `make uefi64-kernel` | 64-bit Lepton kernel builds |
+| `make iso-hybrid` | 276 MB hybrid ISO builds |
+| BIOS hybrid boot | Lepton kernel self-checks run |
+| UEFI hybrid boot | 64-bit Lepton kernel self-checks run |
+| UEFI `fwdpos 0 1` | 28 (`,`) with SmolLM2 Q4_0 |
+| UEFI `ask "what is 2+2?" 8` | `2 + 2 = 4.` |
+| UEFI `chat` one turn | `2 + 2 = 4.`, `ctx 47/256` |
+| UEFI Ctrl+C during prefill | Cancels and returns to prompt |
 | `pyflakes` / `git diff --check` | Clean |
-| TinyStories `fwdpos 0 1` | Token 9038 (`Once`) |
-| TinyStories `genprompt` | Correct |
-| SmolLM `selftest` | PASS |
-| Instruct Q4_0 `ask "What is 2+2?" 8` | `2 + 2 = 4.` |
-| Q4_K_M `config` / `fwdpos` | Clear unsupported K-quant error |
-| QEMU Q4_0 Ask prefill/answer | 59.08 s / 14.96 s for 8 tokens |
-| Chat `/new`, `/ctx`, `/exit` | Verified in QEMU |
-| Scrollback | Verified in QEMU via Ctrl+P |
-| Ctrl+C prefill/generation | Verified |
 
-The S9 functional test passed for the v0.3.1 model path. Chat, scrollback, and
-the mixed-K-quant guard still need an S9 smoke test before field sign-off.
+QEMU UEFI timings are slow:
+
+```text
+ask prefill: 133000 ms, answer: 35000 ms
+chat system prefill: 73000 ms, question prefill: 57000 ms
+```
+
+These are QEMU/64-bit codegen timings, not native Ryzen expectations.
 
 ## S9 baseline
 
-Recorded in [S9_BASELINE.md](S9_BASELINE.md):
+From [S9_BASELINE.md](S9_BASELINE.md):
 
 ```text
-heap:              16,036,176 / 67,108,864 bytes
-bench 8:           7270 ms (908.75 ms/token)
+heap: 16,036,176 / 67,108,864 bytes
+bench 8: 7270 ms (908.75 ms/token)
 first ask prefill: 16620 ms
-first ask answer:   6420 ms
-second prefill:     6180 ms
-second answer:      6420 ms
-2+2:               2 + 2 = 4
-3+3:               3 + 3 = 3 +   (model-quality error)
+first ask answer: 6420 ms
+second prefill: 6180 ms
+second answer: 6420 ms
 ```
 
-The batched Q4_0 matvec experiment was faster in QEMU but slower on the S9
-(21.78 s / 8.73 s prefills) and was reverted. Per-token SSE2 remains the
-release path.
+The S9 BIOS32 path was field-tested for v0.3.1 and remains the same kernel
+path. The UEFI64 path still needs a Ryzen field test.
+
+## Hybrid ISO layout
+
+```text
+/boot/lepton32.elf             BIOS32 kernel
+/models/smollm2...gguf         BIOS Multiboot model
+/boot/efi.img                  FAT ESP El Torito image
+  EFI/BOOT/BOOTX64.EFI         64-bit kernel
+  models/smollm2...gguf        UEFI model
+```
+
+The model is duplicated because BIOS Multiboot and UEFI file access use
+different filesystems.
 
 ## Known limitations
 
-- Mixed K-quant models are refused; the root cause of their corrupt forward
-  output is unresolved.
-- Q8_0 is supported but larger and slower than Q4_0.
-- Context is capped at 256 positions and the heap at 64 MB.
-- SmolLM2-135M is unreliable at arithmetic.
-- No filesystem, graphical UI, or persistent chat transcript.
-- The S9 is a single-core Atom; first-token prefill remains noticeable.
+- UEFI64 uses Boot Services; native 64-bit mode is not implemented.
+- The 64-bit core still has 32-bit pointer assumptions, bounded by a low
+  model/heap region.
+- Hybrid ISO creation requires GRUB, xorriso, mtools, and OVMF; it is not yet
+  in CI.
+- Mixed K-quant models are refused explicitly.
+- SmolLM2-135M remains unreliable at arithmetic.
 
 ## Upgrade notes
 
-- Use `models/smollm2-instruct-q4_0.gguf` for Instruct Q&A.
-- Q4_K_S/Q4_K_M now fail fast with:
-  `mixed K-quant model; use a Q4_0 or Q8_0 conversion`.
-- `chat` uses `/new` to reset, `/ctx` for usage, and `/exit` to leave.
-- PageUp/PageDown or Ctrl+P/Ctrl+N review previous VGA pages.
+- BIOS32: `make kernel32`, `make iso`.
+- UEFI64: `make uefi64-kernel`, `make run-uefi64-kernel`.
+- Both: `make iso-hybrid`.
+- Recommended model: `models/smollm2-instruct-q4_0.gguf`.

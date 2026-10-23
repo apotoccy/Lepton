@@ -7,7 +7,7 @@ kernel/src/kernel.lp       shared core: GGUF, inference, REPL, chat
 kernel/src/runtime.c       shared heap, serial/VGA helpers, SSE2 kernels
 kernel/platform.h          platform contract and BootInfo
 kernel/arch/bios32/        BIOS32 implementation (current release)
-kernel/arch/uefi64/        UEFI64 port (next phase)
+kernel/arch/uefi64/        UEFI64 platform and boot
 ```
 
 ## Current targets
@@ -21,15 +21,16 @@ kernel/arch/uefi64/        UEFI64 port (next phase)
 | `make run-uefi64` | Hello milestone | Boots the EFI hello app under OVMF |
 | `make uefi64-shell` | Shell milestone | GOP console + ConIn platform shell |
 | `make run-uefi64-shell` | Shell milestone | Boots the platform shell under OVMF |
-| `make uefi64-kernel` | Inference milestone | 64-bit Lepton core + embedded Q4_0 model |
+| `make uefi64-kernel` | Stable milestone | 64-bit Lepton core; model loaded from ESP |
 | `make run-uefi64-kernel` | Inference milestone | Boots the 64-bit kernel under OVMF |
 | `make iso-hybrid` | Release image | BIOS32 + UEFI64 hybrid ISO |
 | `make run-iso-hybrid` | Release image | Boots the BIOS hybrid under QEMU |
 | `make run-iso-hybrid-uefi` | Release image | Boots the UEFI hybrid under OVMF |
 | `make iso` | Stable | BIOS GRUB ISO |
 
-`kernel64-check` is not a bootable UEFI kernel yet. It currently exposes
-32-bit pointer assumptions in the shared core, which the UEFI port will fix.
+`kernel64-check` is a compile check; the bootable target is `uefi64-kernel`.
+The shared core still contains 32-bit pointer assumptions, but the low-memory
+UEFI model/heap region keeps addresses below 4 GB.
 
 The UEFI64 hello application boots under OVMF, prints over serial and GOP,
 reports the UEFI memory map, and locates the Graphics Output Protocol.

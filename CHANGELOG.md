@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.5.0 — 2026-10-23
 
 - Split the kernel onto a shared platform contract with a BIOS32 shim.
 - Added `kernel32` and `kernel64-check` targets; the shared core now compiles

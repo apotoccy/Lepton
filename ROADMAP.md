@@ -2,7 +2,7 @@
 
 Compiler and OS for edge AI inference, from 32-bit PCs to modern devices.
 
-## Current status (v0.4.0, October 2026)
+## Current status (v0.5.0, October 2026)
 
 - **Compiler:** single IR pipeline (AST → IR → verify → C11); 134/134 compiler
   tests pass on scalar and SSE2, plus 13 IR-verifier and 12 conversion-policy
@@ -14,13 +14,12 @@ Compiler and OS for edge AI inference, from 32-bit PCs to modern devices.
   cache. Q8_0 is usable; mixed K-quant models are refused explicitly.
 - **S9:** baseline recorded; 908.75 ms/token for `bench 8`, first Ask prefill
   16.62 s, cached second prefill 6.18 s, answer 6.42 s.
-- **Platforms:** shared core plus BIOS32 shim; 64-bit compile check wired.
-  A UEFI64 hello app, GOP/ConIn platform shell, and 64-bit Lepton kernel with
-  and 64-bit Lepton kernel boot under OVMF. The 64-bit kernel loads
-  SmolLM2-135M-Instruct Q4_0 from the ESP and runs `fwdpos`; a BIOS32+UEFI64
-  hybrid ISO boots both paths. The 64-bit `ask`/`chat` path now works under
-  OVMF with Ctrl+C cancellation.
-- **Next focus:** native 64-bit mode, ESP/input polish, and v0.5.0 release.
+- **Platforms:** shared core, BIOS32 shim, and UEFI64 implementation. The
+  UEFI64 kernel loads SmolLM2-135M-Instruct Q4_0 from the ESP, supports
+  `ask`/`chat`, and accepts Ctrl+C cancellation. A BIOS32+UEFI64 hybrid ISO
+  boots both paths.
+- **Next focus:** native 64-bit mode (exit Boot Services), input polish, and
+  CI coverage for the hybrid image.
 
 ## Verification checklist
 

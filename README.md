@@ -9,30 +9,31 @@ The reference target is a 15M-parameter TinyStories model. The kernel boots on a
 2008 Lenovo IdeaPad S9 (Intel Atom) and in QEMU; the same kernel can be packaged
 as a GRUB ISO.
 
-## Status (as of October 2026, v0.4.0)
+## Status (as of October 2026, v0.5.0)
 
 - **Compiler:** 134/134 regression tests pass with both the scalar and x86-64
   SSE2 targets (`make test`, `make test-sse`), plus 13 IR-verifier and 12
   conversion-policy unit tests.
-- **Build:** 64-bit and 32-bit userland programs build; the freestanding 32-bit
-  kernel builds; the GRUB ISO builds.
-- **Boot:** the kernel boots via QEMU `-kernel` and via the ISO `-cdrom` path.
-- **Inference:** TinyStories-15M and SmolLM2-135M-Instruct run from a
-  Multiboot module. `fwdpos 0 1` predicts TinyStories token 9038, matching an
-  independent reference; the Instruct Q4_0 profile answers
+- **Build:** 64-bit and 32-bit userland programs build; BIOS32 and UEFI64
+  kernels build; the BIOS and hybrid ISOs build.
+- **Boot:** the BIOS32 kernel boots via QEMU/GRUB; the UEFI64 kernel boots via
+  OVMF and a direct FAT ESP; one hybrid ISO carries both.
+- **Inference:** TinyStories-15M and SmolLM2-135M-Instruct Q4_0 run on BIOS32;
+  the UEFI64 kernel loads SmolLM2 from the EFI System Partition. Both answer
   `ask "What is 2+2?" 8` with `2 + 2 = 4.`
 - **Tokenizer:** `encode Once upon a time` produces `[9038, 2501, 263, 931]`,
   matching a greedy reference.
 - **Interaction:** multi-turn ChatML `chat`, rolling context memory, a
-  context/timing/heap status prompt, and eight-page VGA scrollback.
+  context/timing/heap status prompt, Ctrl+C cancellation, and eight-page VGA
+  scrollback on BIOS32.
 - **Scope:** inference is verified for Llama-architecture Q4_0 and Q8_0
   models. Mixed K-quant files are refused explicitly. See
   [Current limitations](#current-limitations).
 
 ## Platform targets
 
-Lepton currently ships a BIOS32 kernel for the S9 and QEMU. The shared core
-also compiles as 64-bit C; the bootable UEFI64 target is under development.
+Lepton ships BIOS32 and UEFI64 kernels from one shared core. The hybrid ISO
+boots BIOS32 on the S9 and UEFI64 on modern PCs.
 See [PLATFORMS.md](PLATFORMS.md).
 
 ```bash
