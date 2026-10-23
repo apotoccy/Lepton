@@ -2,17 +2,20 @@
 
 Compiler and OS for edge AI inference, from 32-bit PCs to modern devices.
 
-## Current status (October 2026)
+## Current status (v0.4.0, October 2026)
 
 - **Compiler:** single IR pipeline (AST → IR → verify → C11); 134/134 compiler
   tests pass on scalar and SSE2, plus 13 IR-verifier and 12 conversion-policy
   unit tests.
-- **OS:** 32-bit Multiboot kernel, GRUB ISO, QEMU boot, and an interactive REPL.
-- **Inference:** TinyStories-15M runs from a Multiboot module. The forward pass
-  matches an independent reference for position 0 (token 9038) and for a
-  four-token "Once upon a time" prefill (first greedy token 29892, `,`).
-- **Next focus:** derive the model shape from GGUF, bound context/memory, then
-  optimize with quantized matvec.
+- **OS:** 32-bit Multiboot kernel, GRUB ISO, QEMU boot, interactive REPL,
+  multi-turn `chat`, and eight-page VGA scrollback.
+- **Inference:** TinyStories-15M and SmolLM2-135M-Instruct Q4_0 run from a
+  Multiboot module. Instruct `ask` works with the ChatML system/user prefix
+  cache. Q8_0 is usable; mixed K-quant models are refused explicitly.
+- **S9:** baseline recorded; 908.75 ms/token for `bench 8`, first Ask prefill
+  16.62 s, cached second prefill 6.18 s, answer 6.42 s.
+- **Next focus:** root-cause mixed K-quant corruption, then consider larger
+  context/heap and further SSE2 coverage.
 
 ## Verification checklist
 

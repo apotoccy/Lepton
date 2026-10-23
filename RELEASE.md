@@ -1,17 +1,20 @@
-# Lepton v0.3.1 Release Validation
+# Lepton v0.4.0 Release Validation
 
-Date: 2026-10-22
+Date: 2026-10-23
 
 ## Release contents
 
-- REPL 2.0: cursor editing, eight-entry history, tab completion, colored
-  prompt, `clear`, and `help <command>` topics.
-- Grouped-query attention with a synthetic two-position reference.
-- Multiboot memory-map heap sizing, allocation checks, and low-memory failure.
-- Tokenizer bounds, `<0xNN>` byte fallback, and a working merge-based BPE path.
-- Configurable generation length, EOS stopping, and greedy temperature `0`.
-- GQA, merge-tokenizer, and full-forward reference tooling.
-- Pure GGUF fixture checks in CI.
+- Multi-turn ChatML `chat` mode with a persistent system prefix.
+- Rolling conversation memory: oldest-turn eviction, KV rebuild, `/new`,
+  `/ctx`, and `/help`.
+- Context-aware `you [used/max]>` prompt with prefill/answer timing, token
+  count, and heap usage.
+- Eight-page VGA scrollback with PageUp/PageDown and Ctrl+P/Ctrl+N.
+- Mixed K-quant compatibility guard: Q4_K_M and other mixed K-quant models
+  are refused instead of producing corrupt text.
+- Q4_0 and Q8_0 Instruct inference remain supported.
+- Per-function annotations across `kernel/src/kernel.lp` and `leptonc.py`.
+- S9 baseline and the reverted batched-Q4 experiment documented.
 
 ## Validation matrix
 
@@ -19,90 +22,56 @@ Date: 2026-10-22
 |---|---|
 | `make test` | 134 passed, 0 failed |
 | `make test-sse` | 134 passed, 0 failed |
-| Clean `make all` | Passes |
+| `make all` | 64-bit and 32-bit userland builds pass |
 | `make -B kernel` | Builds `build/kernel/kernel.elf` |
-| GQA fixture | Reference and kernel both predict token 3 at position 1 |
-| Q4_K fixture | Reference and kernel both report sum 928, dot -20.5 |
-| Q5_K/Q6_K fixtures | Reference and kernel agree on sums and dots |
-| Merge fixture | Reference and kernel both resolve `ab` to token 5 (`▁ab`) |
-| Full forward reference | Predicts token 29892 (`,`) for `Once upon a time` |
-| QEMU 128 MB | Boots; `fwdpos 0 1` returns 9038 (`Once`) |
-| QEMU 32 MB | Boots with a 10.8 MB heap; same prediction |
-| QEMU 24 MB | Clean low-memory fatal message |
-| REPL editor | History, Tab, Left/Delete verified in QEMU |
+| `make iso MODEL=models/smollm2-instruct-q4_0.gguf` | Builds 100 MB ISO |
 | `pyflakes` / `git diff --check` | Clean |
+| TinyStories `fwdpos 0 1` | Token 9038 (`Once`) |
+| TinyStories `genprompt` | Correct |
+| SmolLM `selftest` | PASS |
+| Instruct Q4_0 `ask "What is 2+2?" 8` | `2 + 2 = 4.` |
+| Q4_K_M `config` / `fwdpos` | Clear unsupported K-quant error |
+| QEMU Q4_0 Ask prefill/answer | 59.08 s / 14.96 s for 8 tokens |
+| Chat `/new`, `/ctx`, `/exit` | Verified in QEMU |
+| Scrollback | Verified in QEMU via Ctrl+P |
+| Ctrl+C prefill/generation | Verified |
 
-## Performance baseline
+The S9 functional test passed for the v0.3.1 model path. Chat, scrollback, and
+the mixed-K-quant guard still need an S9 smoke test before field sign-off.
 
-Model: TinyStories-15M, Q4_0 weights, 6 layers, `n_embd=288`, 128-position
-context.
+## S9 baseline
 
-Host: AMD Ryzen 7 5800HS, Ubuntu 6.8 kernel, QEMU 6.2.0, `-m 128`.
+Recorded in [S9_BASELINE.md](S9_BASELINE.md):
 
 ```text
-lepton> bench 16
-  bench: 16 tokens in 4360 ms (272.5 ms/token)
+heap:              16,036,176 / 67,108,864 bytes
+bench 8:           7270 ms (908.75 ms/token)
+first ask prefill: 16620 ms
+first ask answer:   6420 ms
+second prefill:     6180 ms
+second answer:      6420 ms
+2+2:               2 + 2 = 4
+3+3:               3 + 3 = 3 +   (model-quality error)
 ```
 
-With `-m 32`:
-
-```text
-lepton> bench 8
-  bench: 8 tokens in 2240 ms (280 ms/token)
-```
-
-`bench [N]` measures sequential forward passes at 100 Hz PIT resolution. It is
-a CPU baseline, not a wall-clock S9 measurement.
-
-## S9 field test
-
-Passed on the Lenovo IdeaPad S9 (user report). The exact baseline numbers
-should still be recorded using [S9_BASELINE.md](S9_BASELINE.md).
-
-1. Build the tagged ISO with `make iso MODEL=models/tinystories.gguf`.
-2. Boot it and confirm the prompt accepts typing. Then run `config`,
-   `fwdpos 0 1`, `bench 8`, and `genprompt "Once upon a time" 0 1 20`.
-3. Record the S9 `bench` result and whether `poweroff` completes after the
-   ACPI `_S5` fix.
-
-The host has no physical S9 access; the field result above is supplied by the
-user. Keep the numeric baseline separate from the functional pass report.
+The batched Q4_0 matvec experiment was faster in QEMU but slower on the S9
+(21.78 s / 8.73 s prefills) and was reverted. Per-token SSE2 remains the
+release path.
 
 ## Known limitations
 
-- S9 keyboard input uses controller initialization plus a polling fallback;
-  field testing passed after the v0.2.1 keyboard fix.
-- REPL 2.0 is QEMU-tested; an S9 line-editing/history retest is pending.
-- SmolLM2-135M is validated in QEMU: config, GPT-2 tokenization, tied output,
-  GQA, RoPE base 100000, prompt prefill, generation, and `selftest`
-  (BOS 29, prompt 28). `ask` is validated with the Instruct Q4_0 variant
-  (`2 + 2 = 4.`); Q5_0/Q5_1 support is implemented and fixture-validated,
-  but Q4_K_M still produced incorrect text.
-  `selftest` remains base-profile-specific; use `ask` for Instruct.
-  QEMU ask baseline after batched prefill/SSE2: ~58 s for the first 37-token
-  ChatML prefill and ~21 s for later questions after the prefix cache. Use
-  `keytest` and `S9_BASELINE.md`.
-- One S9 report showed a black screen with the REPL build; the boot path is
-  being triaged separately from the keyboard fix.
-- `poweroff` now uses the DSDT `_S5` sleep types and the FADT SMI/PM1 fields;
-  S9 retest is required.
-- Heap cap is 64 MB and the inference workspace budget is 60 MB; models above
-  the TinyStories class do not fit.
-- Context is capped at 256 positions.
-- Q4_0, Q8_0, Q4_K, Q5_K, Q6_K, F16, and F32 weights are supported.
-- Tensor shape/type checks now fail softly for incompatible matvecs.
-- GQA is implemented and synthetic-tested; no real GQA model has been run.
-- The tokenizer merge path is synthetic-tested; TinyStories has no merges.
-- Generation defaults to 30 tokens and streams output; stop sequences and
-  Ctrl+C cancellation are supported.
-- No scrollback; command history is limited to eight entries.
-- 272.5 ms/token is the current QEMU baseline (about 9% faster than the
-  previous 299.4 ms/token); S9 performance is expected to be slower.
+- Mixed K-quant models are refused; the root cause of their corrupt forward
+  output is unresolved.
+- Q8_0 is supported but larger and slower than Q4_0.
+- Context is capped at 256 positions and the heap at 64 MB.
+- SmolLM2-135M is unreliable at arithmetic.
+- No filesystem, graphical UI, or persistent chat transcript.
+- The S9 is a single-core Atom; first-token prefill remains noticeable.
 
-## Next-phase priorities
+## Upgrade notes
 
-1. S9 benchmark and poweroff investigation (ACPI/APM).
-2. K-quant support for broader GGUF compatibility.
-3. Real GQA and merge-tokenizer model validation.
-4. Streaming generation and stop sequences.
-5. Larger-context / lower-memory inference work.
+- Use `models/smollm2-instruct-q4_0.gguf` for Instruct Q&A.
+- Q4_K_S/Q4_K_M now fail fast with:
+  `mixed K-quant model; use a Q4_0 or Q8_0 conversion`.
+- `chat` uses `/new` to reset, `/ctx` for usage, and `/exit` to leave.
+- PageUp/PageDown or Ctrl+P/Ctrl+N review previous VGA pages.

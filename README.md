@@ -9,7 +9,7 @@ The reference target is a 15M-parameter TinyStories model. The kernel boots on a
 2008 Lenovo IdeaPad S9 (Intel Atom) and in QEMU; the same kernel can be packaged
 as a GRUB ISO.
 
-## Status (as of October 2026, v0.2.1)
+## Status (as of October 2026, v0.4.0)
 
 - **Compiler:** 134/134 regression tests pass with both the scalar and x86-64
   SSE2 targets (`make test`, `make test-sse`), plus 13 IR-verifier and 12
@@ -17,14 +17,17 @@ as a GRUB ISO.
 - **Build:** 64-bit and 32-bit userland programs build; the freestanding 32-bit
   kernel builds; the GRUB ISO builds.
 - **Boot:** the kernel boots via QEMU `-kernel` and via the ISO `-cdrom` path.
-- **Inference:** TinyStories-15M loads from a Multiboot module. `fwdpos 0 1`
-  predicts token 9038, matching an independent Python reference. After a
-  four-token "Once upon a time" prefill, greedy generation starts with token
-  29892 (`,`), matching a full reference that includes Q/K, RoPE, and attention.
+- **Inference:** TinyStories-15M and SmolLM2-135M-Instruct run from a
+  Multiboot module. `fwdpos 0 1` predicts TinyStories token 9038, matching an
+  independent reference; the Instruct Q4_0 profile answers
+  `ask "What is 2+2?" 8` with `2 + 2 = 4.`
 - **Tokenizer:** `encode Once upon a time` produces `[9038, 2501, 263, 931]`,
   matching a greedy reference.
-- **Scope:** inference is currently specialized to the TinyStories-15M
-  architecture and Q4_0/Q8_0 weights. See [Current limitations](#current-limitations).
+- **Interaction:** multi-turn ChatML `chat`, rolling context memory, a
+  context/timing/heap status prompt, and eight-page VGA scrollback.
+- **Scope:** inference is verified for Llama-architecture Q4_0 and Q8_0
+  models. Mixed K-quant files are refused explicitly. See
+  [Current limitations](#current-limitations).
 
 ## Key features
 
@@ -412,8 +415,8 @@ These are the boundaries of the current implementation, not a wish list; see
 
 - **Model dimensions.** Activation, KV, logits, and token-table workspaces are
   sized from GGUF metadata, subject to a 60 MB budget and a 256-position
-  context cap. Q4_0/Q5_0/Q5_1/Q8_0/Q4_K/Q5_K/Q6_K weights and F16/F32
-  fallbacks are supported. Tokenizer buffers are capacity-checked for the line and prompt
+  context cap. Q4_0 and Q8_0 are supported for inference; Q5_0/Q5_1 and
+  K-quant blocks are implemented but mixed K-quant models are refused. Tokenizer buffers are capacity-checked for the line and prompt
   limits.
 - **Context safety.** The configured `max_seq` is enforced by the forward guard
   and generation loops, with a hard cap of 256 KV positions. The KV cache is
@@ -432,8 +435,9 @@ These are the boundaries of the current implementation, not a wish list; see
   before the mark. Heap allocation failures are checked, and the heap is
   bounded by the Multiboot memory map (capped at 64 MB, minimum 8 MB after the
   loaded module).
-- **Quantization coverage.** Q4_0, Q5_0, Q5_1, Q8_0, Q4_K, Q5_K, and Q6_K
-  are implemented, plus F16 and F32 fallbacks.
+- **Quantization coverage.** Q4_0 and Q8_0 are verified for inference.
+  Q5_0/Q5_1/Q4_K/Q5_K/Q6_K decoders are implemented and fixture-checked, but
+  models mixing those blocks are refused with a clear error.
 - **Freestanding file I/O.** `lp_file_size`, `lp_read_file_at`, and
   `lp_write_file` are defined in the kernel and return `-1`; there is no
   filesystem driver. Hosted builds use real file I/O.
@@ -452,8 +456,8 @@ These are the boundaries of the current implementation, not a wish list; see
   `ctx` usage and answers report prefill/answer time and heap. PageUp/PageDown or
   Ctrl+P/Ctrl+N review up to eight previous VGA pages. The system/user ChatML
   prefix is cached after the first ask:
-  QEMU baseline after batched prefill/SSE2 was ~58 s for the first prefill and
-  ~21 s for later questions. The cache is invalidated by KV-clearing commands.
+  QEMU baseline after layer-major prefill/SSE2 was ~58 s for the first prefill
+  and ~21 s for later questions. The cache is invalidated by KV-clearing commands.
   See [S9_BASELINE.md](S9_BASELINE.md) for the clean S9 measurement sequence. The tested file is
   `models/smollm2-instruct-q4_0.gguf` (Q4_0); Q4_K_S/Q4_K_M are refused by
   the mixed-K-quant compatibility guard. Use Q8_0 if a larger model is

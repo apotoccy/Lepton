@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.4.0 — 2026-10-23
 
 - Added `chat`, a multi-turn ChatML mode with a persistent system prefix,
   conversation KV state, `ctx` status, `/exit`, and Ctrl+C cancellation.
@@ -14,6 +14,8 @@
   reported after each turn.
 - Refuse mixed K-quant models (Q4_K/Q5_K/Q6_K/Q5_0/Q5_1) before inference
   instead of producing corrupt output; Q4_0 and Q8_0 remain supported.
+- Kept the per-token SSE2 Q4_0 prefill path after the batched variant proved
+  slower on the S9; the experiment is recorded in `S9_BASELINE.md`.
 
 ## v0.3.1 — 2026-10-22
 
