@@ -16,6 +16,8 @@
   OVMF with SmolLM2-135M-Instruct Q4_0 returns `fwdpos 0 1` = 28 (`,`).
 - Build a hybrid ISO with a BIOS32 GRUB/El Torito entry and a direct UEFI64
   FAT ESP entry. Both boot the SmolLM2 model.
+- Add UEFI64 keyboard queueing and Ctrl+C cancellation, fix platform tick
+  units, and verify `ask`/`chat` with SmolLM2 Q4_0 under OVMF.
 
 ## v0.4.0 — 2026-10-23
 

@@ -47,6 +47,26 @@ The model path is `\models\smollm2-instruct-q4_0.gguf`; the FAT image is
 built by `run-uefi64-kernel`. Loading a model no longer requires rebuilding
 the EFI binary.
 
+The 64-bit kernel now supports one-shot `ask` and multi-turn `chat`, with
+ChatML context status. OVMF verification:
+
+```text
+ask "what is 2+2?" 8
+  prefill: 133000 ms
+  2 + 2 = 4.
+  answer: 35000 ms for 8 token(s)
+
+chat
+  system prefill: 73000 ms
+  prefilling 16 tokens...
+  prefill: 57000 ms
+  2 + 2 = 4.
+  ctx 47/256 | turns 1 | 8 tok / 50000 ms | heap 16/64 MB
+```
+
+Ctrl+C cancels 64-bit prefill. These QEMU timings are slow; native Ryzen
+hardware and later optimization should be much faster.
+
 ## Hybrid ISO
 
 `make iso-hybrid` creates `build/kernel/lepton-hybrid.iso` with two El Torito

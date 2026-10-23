@@ -18,8 +18,9 @@ Compiler and OS for edge AI inference, from 32-bit PCs to modern devices.
   A UEFI64 hello app, GOP/ConIn platform shell, and 64-bit Lepton kernel with
   and 64-bit Lepton kernel boot under OVMF. The 64-bit kernel loads
   SmolLM2-135M-Instruct Q4_0 from the ESP and runs `fwdpos`; a BIOS32+UEFI64
-  hybrid ISO boots both paths. Ask/chat on the 64-bit build is next.
-- **Next focus:** 64-bit `ask`/`chat`, then native UEFI mode.
+  hybrid ISO boots both paths. The 64-bit `ask`/`chat` path now works under
+  OVMF with Ctrl+C cancellation.
+- **Next focus:** native 64-bit mode, ESP/input polish, and v0.5.0 release.
 
 ## Verification checklist
 

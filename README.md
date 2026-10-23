@@ -47,6 +47,9 @@ make run-uefi64-kernel # boot it with SmolLM2 Q4_0 from the ESP
 make iso-hybrid        # BIOS32 + UEFI64 hybrid ISO
 ```
 
+The UEFI64 build supports `ask` and `chat`; it loads SmolLM2 Q4_0 from the
+ESP and reports context/timing/heap status.
+
 ## Key features
 
 - **Bare-metal AI:** runs a GGUF model directly on the CPU with no underlying OS

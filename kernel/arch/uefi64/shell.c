@@ -178,21 +178,42 @@ static void *heap_alloc(UINTN bytes) {
     return heap_base + at;
 }
 
-static UINT32 input_read(void) {
+#define INPUT_QUEUE 64
+static UINT32 input_q[INPUT_QUEUE];
+static UINT32 input_head, input_tail;
+
+static UINT32 input_map(EFI_INPUT_KEY k) {
+    if (k.UnicodeChar != 0) return (UINT32)k.UnicodeChar;
+    if (k.ScanCode == 0x01) return 0x100;
+    if (k.ScanCode == 0x02) return 0x101;
+    if (k.ScanCode == 0x03) return 0x102;
+    if (k.ScanCode == 0x04) return 0x103;
+    if (k.ScanCode == 0x05) return 0x104;
+    if (k.ScanCode == 0x06) return 0x105;
+    if (k.ScanCode == 0x07) return 0x106;
+    return 0;
+}
+static void input_poll_raw(void) {
     EFI_INPUT_KEY k;
     EFI_STATUS s;
-    if (!ST->ConIn) return 0;
-    s = ST->ConIn->ReadKeyStroke(ST->ConIn, &k);
-    if (s & EFI_ERROR_MASK) return 0;
-    if (k.UnicodeChar != 0) return (UINT32)k.UnicodeChar;
-    if (k.ScanCode == 0x01) return 0x100; /* up */
-    if (k.ScanCode == 0x02) return 0x101; /* down */
-    if (k.ScanCode == 0x03) return 0x102; /* left */
-    if (k.ScanCode == 0x04) return 0x103; /* right */
-    if (k.ScanCode == 0x05) return 0x104; /* home */
-    if (k.ScanCode == 0x06) return 0x105; /* end */
-    if (k.ScanCode == 0x07) return 0x106; /* delete */
-    return 0;
+    if (!ST->ConIn) return;
+    for (;;) {
+        s = ST->ConIn->ReadKeyStroke(ST->ConIn, &k);
+        if (s & EFI_ERROR_MASK) break;
+        UINT32 ev = input_map(k);
+        if (ev == 0) continue;
+        UINT32 next = (input_head + 1) % INPUT_QUEUE;
+        if (next == input_tail) break;
+        input_q[input_head] = ev;
+        input_head = next;
+    }
+}
+static UINT32 input_read(void) {
+    input_poll_raw();
+    if (input_tail == input_head) return 0;
+    UINT32 ev = input_q[input_tail];
+    input_tail = (input_tail + 1) % INPUT_QUEUE;
+    return ev;
 }
 
 static char line[128];
@@ -378,10 +399,18 @@ void lp_plat_console_init(void) { con_clear(); }
 void lp_plat_putc(char c) { con_putc(c); }
 void lp_plat_interrupts_init(void) { }
 void lp_plat_halt(void) { ST->BootServices->Stall(1000); }
-UINT32 lp_plat_ticks(void) { platform_ticks = time_ms(); return platform_ticks; }
+UINT32 lp_plat_ticks(void) { platform_ticks = time_ms() / 10; return platform_ticks; }
 UINT32 lp_plat_input_read(void) { return input_read(); }
-void lp_plat_input_poll(void) { }
-UINT32 lp_plat_input_cancel_pending(void) { return 0; }
+void lp_plat_input_poll(void) { input_poll_raw(); }
+UINT32 lp_plat_input_cancel_pending(void) {
+    input_poll_raw();
+    UINT32 i = input_tail;
+    while (i != input_head) {
+        if (input_q[i] == 3) return 1;
+        i = (i + 1) % INPUT_QUEUE;
+    }
+    return 0;
+}
 void lp_plat_cursor_left(void) { if (con_x > 0) con_x--; }
 void lp_plat_cursor_right(void) { con_x++; }
 void lp_plat_clear_screen(void) { con_clear(); }
