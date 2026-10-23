@@ -129,7 +129,7 @@ kernel32: check-m32 $(KERNEL_ELF)
 kernel64-check:
 	@mkdir -p $(KERNEL64_OUT)
 	$(LEPTONC) $(KERNEL_LP) --freestanding -S -o $(KERNEL64_OUT)/kernel.c
-	$(CC) -m64 -ffreestanding -fno-stack-protector -fno-pic -fno-builtin \
+	$(CC) -m64 -O$(OPT) -msse2 -mfpmath=sse -ffreestanding -fno-stack-protector -fno-pic -fno-builtin \
 	    -fno-asynchronous-unwind-tables -Wall -Wextra -Wno-unused-parameter \
 	    -c $(KERNEL64_OUT)/kernel.c -o $(KERNEL64_OUT)/kernel.o
 	@echo "kernel64 compile check: $(KERNEL64_OUT)/kernel.o"
@@ -137,7 +137,7 @@ kernel64-check:
 # Minimal UEFI64 application; not yet the Lepton kernel.
 $(UEFI64_OBJ): kernel/arch/uefi64/hello.c
 	@mkdir -p $(UEFI64_OUT)
-	$(CC) -m64 -std=c11 -ffreestanding -fno-stack-protector -fno-pic \
+	$(CC) -m64 -O$(OPT) -msse2 -mfpmath=sse -std=c11 -ffreestanding -fno-stack-protector -fno-pic \
 	    -mno-red-zone -fno-asynchronous-unwind-tables -fno-builtin \
 	    -fno-ident -Wall -Wextra -Wno-unused-parameter -c $< -o $@
 
@@ -154,21 +154,21 @@ $(UEFI64_KERNEL_C): $(KERNEL_LP) leptonc.py
 	$(LEPTONC) $< --freestanding -S -o $@
 
 $(UEFI64_KERNEL_OBJ): $(UEFI64_KERNEL_C)
-	$(CC) -m64 -std=c11 -ffreestanding -fno-stack-protector -fno-pic \
+	$(CC) -m64 -O$(OPT) -msse2 -mfpmath=sse -std=c11 -ffreestanding -fno-stack-protector -fno-pic \
 	    -mno-red-zone -fno-asynchronous-unwind-tables -fno-builtin \
 	    -fno-ident -ffunction-sections -fdata-sections \
 	    -Wall -Wextra -Wno-unused-parameter -c $< -o $@
 
 $(UEFI64_KERNEL_RT): $(KERNEL_RT)
 	@mkdir -p $(KERNEL64_OUT)
-	$(CC) -m64 -std=c11 -ffreestanding -fno-stack-protector -fno-pic \
+	$(CC) -m64 -O$(OPT) -msse2 -mfpmath=sse -std=c11 -ffreestanding -fno-stack-protector -fno-pic \
 	    -mno-red-zone -fno-asynchronous-unwind-tables -fno-builtin -fno-ident \
 	    -ffunction-sections -fdata-sections \
 	    -Wall -Wextra -Wno-unused-parameter -c $< -o $@
 
 $(UEFI64_KERNEL_SH): kernel/arch/uefi64/shell.c kernel/arch/uefi64/uefi.h kernel/arch/uefi64/font8x16.h
 	@mkdir -p $(UEFI64_OUT)
-	$(CC) -m64 -std=c11 -ffreestanding -fno-stack-protector -fno-pic \
+	$(CC) -m64 -O$(OPT) -msse2 -mfpmath=sse -std=c11 -ffreestanding -fno-stack-protector -fno-pic \
 	    -mno-red-zone -fno-asynchronous-unwind-tables -fno-builtin \
 	    -fno-ident -ffunction-sections -fdata-sections -DUEFI_KERNEL \
 	    -Wall -Wextra -Wno-unused-parameter -c $< -o $@
@@ -201,20 +201,20 @@ run-uefi64-kernel: $(UEFI64_KERNEL_DISK)
 
 $(UEFI64_NATIVE_SH): kernel/arch/uefi64/shell.c kernel/arch/uefi64/uefi.h kernel/arch/uefi64/font8x16.h
 	@mkdir -p $(UEFI64_OUT)
-	$(CC) -m64 -std=c11 -ffreestanding -fno-stack-protector -fno-pic \
+	$(CC) -m64 -O$(OPT) -msse2 -mfpmath=sse -std=c11 -ffreestanding -fno-stack-protector -fno-pic \
 	    -mno-red-zone -fno-asynchronous-unwind-tables -fno-builtin -fno-ident \
-	    -ffunction-sections -fdata-sections -DUEFI_KERNEL -DUEFI_NATIVE \
+	    -DUEFI_KERNEL -DUEFI_NATIVE \
 	    -Wall -Wextra -Wno-unused-parameter -c $< -o $@
 
 $(UEFI64_IDT_OBJ): kernel/arch/uefi64/idt.c
 	@mkdir -p $(UEFI64_OUT)
-	$(CC) -m64 -std=c11 -ffreestanding -fno-stack-protector -fno-pic \
+	$(CC) -m64 -O$(OPT) -msse2 -mfpmath=sse -std=c11 -ffreestanding -fno-stack-protector -fno-pic \
 	    -mno-red-zone -fno-asynchronous-unwind-tables -fno-builtin -fno-ident \
 	    -c $< -o $@
 
 $(UEFI64_IDT_ASM): kernel/arch/uefi64/idt.S
 	@mkdir -p $(UEFI64_OUT)
-	$(CC) -m64 -c -fno-pic -fno-pie $< -o $@
+	$(CC) -m64 -O$(OPT) -msse2 -mfpmath=sse -c -fno-pic -fno-pie $< -o $@
 
 $(UEFI64_NATIVE): $(UEFI64_KERNEL_OBJ) $(UEFI64_KERNEL_RT) $(UEFI64_NATIVE_SH) $(UEFI64_IDT_OBJ) $(UEFI64_IDT_ASM)
 	ld -m i386pep -nostdlib --subsystem 10 --entry efi_main \
@@ -244,7 +244,7 @@ run-uefi64-native: $(UEFI64_NATIVE_DISK)
 
 $(UEFI64_SHELL_OBJ): kernel/arch/uefi64/shell.c kernel/arch/uefi64/uefi.h kernel/arch/uefi64/font8x16.h
 	@mkdir -p $(UEFI64_OUT)
-	$(CC) -m64 -std=c11 -ffreestanding -fno-stack-protector -fno-pic \
+	$(CC) -m64 -O$(OPT) -msse2 -mfpmath=sse -std=c11 -ffreestanding -fno-stack-protector -fno-pic \
 	    -mno-red-zone -fno-asynchronous-unwind-tables -fno-builtin \
 	    -fno-ident -Wall -Wextra -Wno-unused-parameter -c $< -o $@
 

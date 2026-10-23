@@ -59,10 +59,13 @@ Native `ask` verification under OVMF:
 
 ```text
 ask "what is 2+2?" 8
-  prefill: 126550 ms
+  prefill: 59030 ms
   2 + 2 = 4.
-  answer: 34470 ms
+  answer: 14940 ms
 ```
+
+The UEFI64 build is now compiled with `-O2`; native `bench 1` is 2140 ms/token
+versus 5060 ms/token before the optimization fix.
 
 PS/2 input still needs scancode-set work; use serial input for native mode.
 Interrupts, APIC timer setup, and native `chat` are future work.

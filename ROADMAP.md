@@ -19,7 +19,8 @@ Compiler and OS for edge AI inference, from 32-bit PCs to modern devices.
   `ask`/`chat`, and accepts Ctrl+C cancellation. A BIOS32+UEFI64 hybrid ISO
   boots both paths.
 - **Next focus:** native PS/2/USB input, APIC timer/interrupts, and CI
-  coverage for the hybrid image.
+  coverage for the hybrid image. UEFI64 now uses the optimized build path and
+  is competitive with BIOS32 in QEMU.
 
 ## Verification checklist
 
