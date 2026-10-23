@@ -403,6 +403,7 @@ $(HYBRID_ISO): check-m32 $(KERNEL_ELF) $(UEFI64_KERNEL) $(UEFI_MODEL) $(KERNEL_B
 	xorriso -as mkisofs -iso-level 3 -R -J \
 	    -b boot/eltorito.img -no-emul-boot -boot-load-size 4 -boot-info-table \
 	    -eltorito-alt-boot -e boot/efi.img -no-emul-boot \
+	    -isohybrid-mbr /usr/lib/grub/i386-pc/boot_hybrid.img \
 	    -isohybrid-gpt-basdat -o $@ $(HYBRID_DIR)
 	@echo "hybrid iso: $@"
 

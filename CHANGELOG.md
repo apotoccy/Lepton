@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add a hybrid MBR/GPT table to `lepton-hybrid.iso` so Etcher/USB writers
+  accept it and UEFI can boot from the FAT ESP. BIOS USB still requires the
+  BIOS-only or CD path.
+
 - Compile all UEFI64 kernel/runtime/platform objects with `-O$(OPT)` and SSE2.
   Native `bench 1` improved from 5060 to 2140 ms/token; native ask from
   126.55/34.47 s to 59.03/14.94 s. Reduce native PE section count so OVMF can

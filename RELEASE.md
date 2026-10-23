@@ -69,7 +69,8 @@ path. The UEFI64 path still needs a Ryzen field test.
 ```
 
 The model is duplicated because BIOS Multiboot and UEFI file access use
-different filesystems.
+different filesystems. A hybrid MBR/GPT table allows USB writers and UEFI
+boot; BIOS USB still needs the BIOS-only/CD path.
 
 ## Known limitations
 

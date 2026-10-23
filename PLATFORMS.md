@@ -91,8 +91,8 @@ hardware and later optimization should be much faster.
 
 ## Hybrid ISO
 
-`make iso-hybrid` creates `build/kernel/lepton-hybrid.iso` with two El Torito
-entries:
+`make iso-hybrid` creates `build/kernel/lepton-hybrid.iso` with a hybrid
+MBR/GPT partition table and two El Torito entries:
 
 - BIOS32 GRUB standalone -> `/boot/lepton32.elf` + `/models/...gguf`;
 - UEFI64 FAT ESP -> `/EFI/BOOT/BOOTX64.EFI` + `/models/...gguf`.
@@ -100,6 +100,11 @@ entries:
 The model is present in both the ISO9660 tree and the FAT ESP because the
 BIOS module and UEFI file APIs read different filesystems. The image is about
 276 MB.
+
+The hybrid MBR makes the image acceptable to USB writers such as Etcher and
+bootable through the UEFI ESP. BIOS USB boot still lands in the GRUB rescue
+prompt because the custom El Torito MBR is not a full GRUB core image; use the
+BIOS-only `make iso` image or boot the hybrid via CD for the S9.
 
 ## Platform contract
 
