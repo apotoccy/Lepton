@@ -3,8 +3,12 @@
 ## Unreleased
 
 - Added an optional UEFI64 native build that loads the model, calibrates TSC,
-  exits Boot Services, and runs the kernel with direct GOP output and serial
-  input. `fwdpos 0 1` returns 28 (`,`).
+  exits Boot Services, installs a minimal exception IDT, and runs the kernel
+  with direct GOP output and serial input.
+  Native `fwdpos 0 1` returns 28 (`,`); native `ask` returns `2 + 2 = 4.`
+  (prefill 126.55 s, answer 34.47 s under OVMF).
+- Fixed PS/2 command ACK handling and added scancode-set selection; PS/2 input
+  remains unreliable and serial input is the native test path.
 
 ## v0.5.0 — 2026-10-23
 

@@ -44,6 +44,8 @@ UEFI_MODEL        ?= models/smollm2-instruct-q4_0.gguf
 UEFI64_KERNEL_DISK := $(UEFI64_OUT)/kernel-disk.img
 UEFI64_NATIVE     := $(UEFI64_OUT)/lepton64-native.efi
 UEFI64_NATIVE_SH  := $(UEFI64_OUT)/kernel-shell-native.o
+UEFI64_IDT_OBJ    := $(UEFI64_OUT)/idt.o
+UEFI64_IDT_ASM    := $(UEFI64_OUT)/idt_asm.o
 UEFI64_NATIVE_DISK := $(UEFI64_OUT)/native-disk.img
 UEFI64_ESP    := $(UEFI64_OUT)/esp.img
 UEFI64_DISK   := $(UEFI64_OUT)/disk.img
@@ -204,10 +206,20 @@ $(UEFI64_NATIVE_SH): kernel/arch/uefi64/shell.c kernel/arch/uefi64/uefi.h kernel
 	    -ffunction-sections -fdata-sections -DUEFI_KERNEL -DUEFI_NATIVE \
 	    -Wall -Wextra -Wno-unused-parameter -c $< -o $@
 
-$(UEFI64_NATIVE): $(UEFI64_KERNEL_OBJ) $(UEFI64_KERNEL_RT) $(UEFI64_NATIVE_SH)
+$(UEFI64_IDT_OBJ): kernel/arch/uefi64/idt.c
+	@mkdir -p $(UEFI64_OUT)
+	$(CC) -m64 -std=c11 -ffreestanding -fno-stack-protector -fno-pic \
+	    -mno-red-zone -fno-asynchronous-unwind-tables -fno-builtin -fno-ident \
+	    -c $< -o $@
+
+$(UEFI64_IDT_ASM): kernel/arch/uefi64/idt.S
+	@mkdir -p $(UEFI64_OUT)
+	$(CC) -m64 -c -fno-pic -fno-pie $< -o $@
+
+$(UEFI64_NATIVE): $(UEFI64_KERNEL_OBJ) $(UEFI64_KERNEL_RT) $(UEFI64_NATIVE_SH) $(UEFI64_IDT_OBJ) $(UEFI64_IDT_ASM)
 	ld -m i386pep -nostdlib --subsystem 10 --entry efi_main \
 	    --image-base 0x10000000 -o $@ $(UEFI64_KERNEL_OBJ) $(UEFI64_KERNEL_RT) \
-	    $(UEFI64_NATIVE_SH)
+	    $(UEFI64_NATIVE_SH) $(UEFI64_IDT_OBJ) $(UEFI64_IDT_ASM)
 	objcopy --remove-section .comment --remove-section .note.gnu.property $@
 	@echo "uefi64 native: $@"
 

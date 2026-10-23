@@ -51,9 +51,21 @@ built by `run-uefi64-kernel`. Loading a model no longer requires rebuilding
 the EFI binary.
 
 A native build (`UEFI_NATIVE`) loads the model while Boot Services are
-available, calibrates TSC, calls `ExitBootServices`, and then runs the kernel
-with direct GOP output, TSC timing, and serial input. PS/2 input needs
-scancode-set work; use serial input for the native milestone.
+available, calibrates TSC, calls `ExitBootServices`, installs a minimal
+exception IDT, and runs the kernel with direct GOP output, TSC timing, and
+serial input.
+
+Native `ask` verification under OVMF:
+
+```text
+ask "what is 2+2?" 8
+  prefill: 126550 ms
+  2 + 2 = 4.
+  answer: 34470 ms
+```
+
+PS/2 input still needs scancode-set work; use serial input for native mode.
+Interrupts, APIC timer setup, and native `chat` are future work.
 
 The 64-bit Boot Services kernel supports one-shot `ask` and multi-turn
 `chat`, with ChatML context status. OVMF verification:

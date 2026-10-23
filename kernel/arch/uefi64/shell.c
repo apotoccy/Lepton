@@ -88,6 +88,7 @@ static void con_putc(char c) {
     if (con_y >= con_rows) { con_scroll(); con_y = con_rows - 1; }
 }
 static void con_puts(const char *s) { while (*s) con_putc(*s++); }
+void platform_puts(const char *s) { con_puts(s); }
 static void con_dec(UINT64 v) {
     char b[24]; int n = 0;
     if (v == 0) { con_putc('0'); return; }
@@ -197,21 +198,32 @@ static void ps2_wait_read(void) {
     for (int i = 0; i < 100000 && !(ps2_status() & 1); i++) { }
 }
 static void ps2_cmd(UINT8 c) { ps2_wait_write(); outb(0x64, c); }
-static void ps2_data(UINT8 c) { ps2_wait_write(); outb(0x60, c); }
-
+static int ps2_read_byte(UINT8 *out) {
+    for (int i = 0; i < 100000; i++) {
+        if (ps2_status() & 1) { *out = inb(0x60); return 0; }
+    }
+    return -1;
+}
+static void ps2_cmd_ack(UINT8 c) { ps2_wait_write(); outb(0x64, c); }
+static void ps2_data_ack(UINT8 c) {
+    ps2_wait_write(); outb(0x60, c);
+    UINT8 ack = 0;
+    (void)ps2_read_byte(&ack);
+}
 static void ps2_init(void) {
     for (int i = 0; i < 32; i++) { if (ps2_status() & 1) (void)inb(0x60); }
-    ps2_cmd(0xAE);
-    ps2_wait_read(); (void)inb(0x60);
-    ps2_cmd(0x20);
-    ps2_wait_read();
-    UINT8 cfg = inb(0x60);
+    ps2_cmd_ack(0xAE);
+    ps2_cmd_ack(0x20);
+    UINT8 cfg = 0;
+    if (ps2_read_byte(&cfg) != 0) cfg = 0x05;
     cfg |= 0x01;
     cfg &= (UINT8)~0x10;
-    ps2_cmd(0x60); ps2_data(cfg);
-    /* Ask for scancode set 1; QEMU and most controllers honor it. */
-    ps2_data(0xF0); ps2_data(0x01);
-    ps2_data(0xF4);
+    ps2_cmd_ack(0x60);
+    ps2_data_ack(cfg);
+    /* Set 1 with explicit ACK handling. */
+    ps2_data_ack(0xF0);
+    ps2_data_ack(0x01);
+    ps2_data_ack(0xF4);
 }
 static const char ps2_normal[128] = {
     0,27,'1','2','3','4','5','6','7','8','9','0','-','=','\b','\t',
@@ -266,6 +278,10 @@ static void serial_poll_input(void) {
         input_push(ev);
     }
 }
+#ifdef UEFI_NATIVE
+extern void native_idt_init(void);
+#endif
+
 static void tsc_calibrate(void) {
     UINT64 a = rdtsc();
     ST->BootServices->Stall(10000);
@@ -653,6 +669,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st) {
         return 1;
     }
     ps2_init();
+    native_idt_init();
 #endif
     main();
     return EFI_SUCCESS;
