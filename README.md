@@ -38,6 +38,8 @@ See [PLATFORMS.md](PLATFORMS.md).
 ```bash
 make kernel32        # BIOS32
 make kernel64-check  # shared-core 64-bit compile check
+make uefi64          # minimal UEFI64 hello application
+make run-uefi64      # boot hello under OVMF
 ```
 
 ## Key features

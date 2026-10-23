@@ -17,10 +17,16 @@ kernel/arch/uefi64/        UEFI64 port (next phase)
 | `make kernel32` | Stable | BIOS/Multiboot kernel for the S9 and QEMU |
 | `make kernel` | Alias for `kernel32` | Existing build path |
 | `make kernel64-check` | Compile check | Verifies the shared core builds as 64-bit C |
+| `make uefi64` | Hello milestone | Minimal 64-bit EFI application |
+| `make run-uefi64` | Hello milestone | Boots the EFI app under OVMF |
 | `make iso` | Stable | BIOS GRUB ISO |
 
 `kernel64-check` is not a bootable UEFI kernel yet. It currently exposes
 32-bit pointer assumptions in the shared core, which the UEFI port will fix.
+
+The UEFI64 hello application boots under OVMF, prints over serial and GOP,
+reports the UEFI memory map, and locates the Graphics Output Protocol. It does
+not enter the Lepton kernel yet.
 
 ## Platform contract
 

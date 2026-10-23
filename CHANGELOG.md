@@ -6,6 +6,8 @@
 - Added `kernel32` and `kernel64-check` targets; the shared core now compiles
   as 64-bit C, exposing pointer-width work for the UEFI64 port.
 - Added `PLATFORMS.md` and CI coverage for the 64-bit compile check.
+- Added a minimal UEFI64 PE application that reports serial/GOP/memory-map
+  information under OVMF.
 
 ## v0.4.0 — 2026-10-23
 

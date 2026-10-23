@@ -47,6 +47,9 @@ jobs:
       - name: Kernel 64-bit compile check
         run: make kernel64-check
 
+      - name: UEFI64 hello build
+        run: make uefi64
+
       - name: GGUF fixture references
         run: |
           mkdir -p build
