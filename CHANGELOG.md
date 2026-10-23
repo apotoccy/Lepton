@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Added an optional UEFI64 native build that loads the model, calibrates TSC,
+  exits Boot Services, and runs the kernel with direct GOP output and serial
+  input. `fwdpos 0 1` returns 28 (`,`).
+
 ## v0.5.0 — 2026-10-23
 
 - Split the kernel onto a shared platform contract with a BIOS32 shim.

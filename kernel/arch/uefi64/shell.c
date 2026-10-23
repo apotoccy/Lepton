@@ -178,6 +178,113 @@ static void *heap_alloc(UINTN bytes) {
     return heap_base + at;
 }
 
+
+#ifdef UEFI_NATIVE
+static UINT64 tsc_start, tsc_per_10ms;
+static int native_shift, native_ctrl;
+static UINT8 ps2_extended;
+
+static inline UINT64 rdtsc(void) {
+    UINT32 lo, hi;
+    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((UINT64)hi << 32) | lo;
+}
+static UINT8 ps2_status(void) { return inb(0x64); }
+static void ps2_wait_write(void) {
+    for (int i = 0; i < 100000 && (ps2_status() & 2); i++) { }
+}
+static void ps2_wait_read(void) {
+    for (int i = 0; i < 100000 && !(ps2_status() & 1); i++) { }
+}
+static void ps2_cmd(UINT8 c) { ps2_wait_write(); outb(0x64, c); }
+static void ps2_data(UINT8 c) { ps2_wait_write(); outb(0x60, c); }
+
+static void ps2_init(void) {
+    for (int i = 0; i < 32; i++) { if (ps2_status() & 1) (void)inb(0x60); }
+    ps2_cmd(0xAE);
+    ps2_wait_read(); (void)inb(0x60);
+    ps2_cmd(0x20);
+    ps2_wait_read();
+    UINT8 cfg = inb(0x60);
+    cfg |= 0x01;
+    cfg &= (UINT8)~0x10;
+    ps2_cmd(0x60); ps2_data(cfg);
+    /* Ask for scancode set 1; QEMU and most controllers honor it. */
+    ps2_data(0xF0); ps2_data(0x01);
+    ps2_data(0xF4);
+}
+static const char ps2_normal[128] = {
+    0,27,'1','2','3','4','5','6','7','8','9','0','-','=','\b','\t',
+    'q','w','e','r','t','y','u','i','o','p','[',']','\n',0,'a','s',
+    'd','f','g','h','j','k','l',';','\'','`',0,'\\','z','x','c','v',
+    'b','n','m',',','.','/',0,'*',0,' ',0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+};
+static const char ps2_shifted[128] = {
+    0,27,'!','@','#','$','%','^','&','*','(',')','_','+','\b','\t',
+    'Q','W','E','R','T','Y','U','I','O','P','{','}','\n',0,'A','S',
+    'D','F','G','H','J','K','L',':','"','~',0,'|','Z','X','C','V',
+    'B','N','M','<','>','?',0,'*',0,' ',0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+};
+static void input_push(UINT32 ev);
+static void ps2_poll(void) {
+    while (ps2_status() & 1) {
+        UINT8 sc = inb(0x60);
+        if (sc == 0xE0) { ps2_extended = 1; continue; }
+        if (ps2_extended) {
+            ps2_extended = 0;
+            if (sc == 0x48) input_push(0x100);
+            else if (sc == 0x50) input_push(0x101);
+            else if (sc == 0x4B) input_push(0x102);
+            else if (sc == 0x4D) input_push(0x103);
+            else if (sc == 0x47) input_push(0x104);
+            else if (sc == 0x4F) input_push(0x105);
+            else if (sc == 0x53) input_push(0x106);
+            else if (sc == 0x49) input_push(0x10A);
+            else if (sc == 0x51) input_push(0x10B);
+            continue;
+        }
+        if (sc == 0x2A || sc == 0x36) { native_shift = 1; continue; }
+        if (sc == 0xAA || sc == 0xB6) { native_shift = 0; continue; }
+        if (sc == 0x1D) { native_ctrl = 1; continue; }
+        if (sc == 0x9D) { native_ctrl = 0; continue; }
+        if (sc & 0x80) continue;
+        if (native_ctrl && sc == 0x2E) { input_push(3); continue; }
+        char c = native_shift ? ps2_shifted[sc] : ps2_normal[sc];
+        if (c) input_push((UINT32)(UINT8)c);
+    }
+}
+static void serial_poll_input(void) {
+    while ((inb(0x3F8 + 5) & 1) != 0) {
+        UINT8 c = inb(0x3F8);
+        UINT32 ev = (c == 13) ? 10 : (UINT32)c;
+        input_push(ev);
+    }
+}
+static void tsc_calibrate(void) {
+    UINT64 a = rdtsc();
+    ST->BootServices->Stall(10000);
+    UINT64 b = rdtsc();
+    tsc_start = b;
+    tsc_per_10ms = (b > a) ? (b - a) : 1;
+}
+static EFI_STATUS native_exit(void) {
+    static UINT8 map[8192];
+    UINTN size = sizeof(map), key = 0, desc = 0;
+    UINT32 ver = 0;
+    EFI_STATUS s = ST->BootServices->GetMemoryMap(&size,
+        (EFI_MEMORY_DESCRIPTOR *)map, &key, &desc, &ver);
+    if (s & EFI_ERROR_MASK) return s;
+    typedef EFI_STATUS (EFIAPI *exit_fn)(EFI_HANDLE, UINTN);
+    return ((exit_fn)ST->BootServices->ExitBootServices)(g_image, key);
+}
+#endif
+
 #define INPUT_QUEUE 64
 static UINT32 input_q[INPUT_QUEUE];
 static UINT32 input_head, input_tail;
@@ -193,7 +300,17 @@ static UINT32 input_map(EFI_INPUT_KEY k) {
     if (k.ScanCode == 0x07) return 0x106;
     return 0;
 }
+static void input_push(UINT32 ev) {
+    UINT32 next = (input_head + 1) % INPUT_QUEUE;
+    if (next == input_tail) return;
+    input_q[input_head] = ev;
+    input_head = next;
+}
 static void input_poll_raw(void) {
+#ifdef UEFI_NATIVE
+    ps2_poll();
+    serial_poll_input();
+#else
     EFI_INPUT_KEY k;
     EFI_STATUS s;
     if (!ST->ConIn) return;
@@ -202,11 +319,9 @@ static void input_poll_raw(void) {
         if (s & EFI_ERROR_MASK) break;
         UINT32 ev = input_map(k);
         if (ev == 0) continue;
-        UINT32 next = (input_head + 1) % INPUT_QUEUE;
-        if (next == input_tail) break;
-        input_q[input_head] = ev;
-        input_head = next;
+        input_push(ev);
     }
+#endif
 }
 static UINT32 input_read(void) {
     input_poll_raw();
@@ -398,8 +513,22 @@ void lp_plat_serial_init(void) { serial_init(); }
 void lp_plat_console_init(void) { con_clear(); }
 void lp_plat_putc(char c) { con_putc(c); }
 void lp_plat_interrupts_init(void) { }
-void lp_plat_halt(void) { ST->BootServices->Stall(1000); }
-UINT32 lp_plat_ticks(void) { platform_ticks = time_ms() / 10; return platform_ticks; }
+void lp_plat_halt(void) {
+#ifdef UEFI_NATIVE
+    __asm__ volatile("pause");
+#else
+    ST->BootServices->Stall(1000);
+#endif
+}
+UINT32 lp_plat_ticks(void) {
+#ifdef UEFI_NATIVE
+    if (tsc_per_10ms == 0) return 0;
+    return (UINT32)((rdtsc() - tsc_start) / tsc_per_10ms);
+#else
+    platform_ticks = time_ms() / 10;
+    return platform_ticks;
+#endif
+}
 UINT32 lp_plat_input_read(void) { return input_read(); }
 void lp_plat_input_poll(void) { input_poll_raw(); }
 UINT32 lp_plat_input_cancel_pending(void) {
@@ -517,6 +646,14 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st) {
         return 1;
     }
     con_clear();
+#ifdef UEFI_NATIVE
+    tsc_calibrate();
+    if (native_exit() & EFI_ERROR_MASK) {
+        con_puts("ExitBootServices failed\r\n");
+        return 1;
+    }
+    ps2_init();
+#endif
     main();
     return EFI_SUCCESS;
 #else

@@ -46,6 +46,8 @@ make run-uefi64-shell # boot the shell under OVMF
 make uefi64-kernel   # 64-bit Lepton core
 make run-uefi64-kernel # boot it with SmolLM2 Q4_0 from the ESP
 make iso-hybrid        # BIOS32 + UEFI64 hybrid ISO
+make uefi64-native     # optional ExitBootServices native mode
+make run-uefi64-native # native mode under OVMF (serial input)
 ```
 
 The UEFI64 build supports `ask` and `chat`; it loads SmolLM2 Q4_0 from the

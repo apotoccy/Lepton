@@ -23,6 +23,8 @@ kernel/arch/uefi64/        UEFI64 platform and boot
 | `make run-uefi64-shell` | Shell milestone | Boots the platform shell under OVMF |
 | `make uefi64-kernel` | Stable milestone | 64-bit Lepton core; model loaded from ESP |
 | `make run-uefi64-kernel` | Inference milestone | Boots the 64-bit kernel under OVMF |
+| `make uefi64-native` | Native milestone | Exits Boot Services; TSC + serial input |
+| `make run-uefi64-native` | Native milestone | Boots native mode under OVMF |
 | `make iso-hybrid` | Release image | BIOS32 + UEFI64 hybrid ISO |
 | `make run-iso-hybrid` | Release image | Boots the BIOS hybrid under QEMU |
 | `make run-iso-hybrid-uefi` | Release image | Boots the UEFI hybrid under OVMF |
@@ -48,8 +50,13 @@ The model path is `\models\smollm2-instruct-q4_0.gguf`; the FAT image is
 built by `run-uefi64-kernel`. Loading a model no longer requires rebuilding
 the EFI binary.
 
-The 64-bit kernel now supports one-shot `ask` and multi-turn `chat`, with
-ChatML context status. OVMF verification:
+A native build (`UEFI_NATIVE`) loads the model while Boot Services are
+available, calibrates TSC, calls `ExitBootServices`, and then runs the kernel
+with direct GOP output, TSC timing, and serial input. PS/2 input needs
+scancode-set work; use serial input for the native milestone.
+
+The 64-bit Boot Services kernel supports one-shot `ask` and multi-turn
+`chat`, with ChatML context status. OVMF verification:
 
 ```text
 ask "what is 2+2?" 8

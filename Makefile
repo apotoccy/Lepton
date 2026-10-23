@@ -42,6 +42,9 @@ UEFI64_KERNEL_RT  := $(KERNEL64_OUT)/runtime-uefi.o
 UEFI64_KERNEL_SH  := $(UEFI64_OUT)/kernel-shell.o
 UEFI_MODEL        ?= models/smollm2-instruct-q4_0.gguf
 UEFI64_KERNEL_DISK := $(UEFI64_OUT)/kernel-disk.img
+UEFI64_NATIVE     := $(UEFI64_OUT)/lepton64-native.efi
+UEFI64_NATIVE_SH  := $(UEFI64_OUT)/kernel-shell-native.o
+UEFI64_NATIVE_DISK := $(UEFI64_OUT)/native-disk.img
 UEFI64_ESP    := $(UEFI64_OUT)/esp.img
 UEFI64_DISK   := $(UEFI64_OUT)/disk.img
 QEMU64        ?= qemu-system-x86_64
@@ -76,6 +79,7 @@ HAVE_M32 := $(shell printf 'int main(void){return 0;}\n' > /tmp/.lp_m32.c; \
 .PHONY: all 64 32 asm run run32 \
         kernel kernel32 kernel64-check uefi64 uefi64-esp run-uefi64 \
         uefi64-shell run-uefi64-shell uefi64-kernel run-uefi64-kernel \
+        uefi64-native run-uefi64-native \
         iso-hybrid run-iso-hybrid run-iso-hybrid-uefi \
         kernel-c kernel-bin iso run-kernel \
         clean clean-kernel check-m32 help
@@ -191,6 +195,39 @@ $(UEFI64_KERNEL_DISK): $(UEFI64_KERNEL) $(UEFI_MODEL)
 
 run-uefi64-kernel: $(UEFI64_KERNEL_DISK)
 	$(QEMU64) -bios $(OVMF) -drive format=raw,file=$(UEFI64_KERNEL_DISK) \
+	    -serial stdio -display none -no-reboot -m 1024
+
+$(UEFI64_NATIVE_SH): kernel/arch/uefi64/shell.c kernel/arch/uefi64/uefi.h kernel/arch/uefi64/font8x16.h
+	@mkdir -p $(UEFI64_OUT)
+	$(CC) -m64 -std=c11 -ffreestanding -fno-stack-protector -fno-pic \
+	    -mno-red-zone -fno-asynchronous-unwind-tables -fno-builtin -fno-ident \
+	    -ffunction-sections -fdata-sections -DUEFI_KERNEL -DUEFI_NATIVE \
+	    -Wall -Wextra -Wno-unused-parameter -c $< -o $@
+
+$(UEFI64_NATIVE): $(UEFI64_KERNEL_OBJ) $(UEFI64_KERNEL_RT) $(UEFI64_NATIVE_SH)
+	ld -m i386pep -nostdlib --subsystem 10 --entry efi_main \
+	    --image-base 0x10000000 -o $@ $(UEFI64_KERNEL_OBJ) $(UEFI64_KERNEL_RT) \
+	    $(UEFI64_NATIVE_SH)
+	objcopy --remove-section .comment --remove-section .note.gnu.property $@
+	@echo "uefi64 native: $@"
+
+uefi64-native: $(UEFI64_NATIVE)
+
+$(UEFI64_NATIVE_DISK): $(UEFI64_NATIVE) $(UEFI_MODEL)
+	@mkdir -p $(UEFI64_OUT)/native-esp/EFI/BOOT $(UEFI64_OUT)/native-esp/models
+	cp $(UEFI64_NATIVE) $(UEFI64_OUT)/native-esp/EFI/BOOT/BOOTX64.EFI
+	cp $(UEFI_MODEL) $(UEFI64_OUT)/native-esp/models/smollm2-instruct-q4_0.gguf
+	rm -f $(UEFI64_OUT)/native-esp.img $@
+	dd if=/dev/zero of=$(UEFI64_OUT)/native-esp.img bs=1M count=100 status=none
+	mkfs.fat -F16 $(UEFI64_OUT)/native-esp.img >/dev/null
+	mcopy -i $(UEFI64_OUT)/native-esp.img -s $(UEFI64_OUT)/native-esp/EFI $(UEFI64_OUT)/native-esp/models ::/
+	truncate -s 128M $@
+	parted -s $@ mklabel msdos mkpart primary fat16 1MiB 127MiB set 1 boot on >/dev/null
+	sfdisk --part-type $@ 1 ef >/dev/null
+	dd if=$(UEFI64_OUT)/native-esp.img of=$@ bs=1M seek=1 conv=notrunc status=none
+
+run-uefi64-native: $(UEFI64_NATIVE_DISK)
+	$(QEMU64) -bios $(OVMF) -drive format=raw,file=$(UEFI64_NATIVE_DISK) \
 	    -serial stdio -display none -no-reboot -m 1024
 
 $(UEFI64_SHELL_OBJ): kernel/arch/uefi64/shell.c kernel/arch/uefi64/uefi.h kernel/arch/uefi64/font8x16.h
@@ -457,6 +494,8 @@ help:
 	@echo "    make run-uefi64-shell boot the shell with OVMF"
 	@echo "    make uefi64-kernel build the 64-bit Lepton kernel"
 	@echo "    make run-uefi64-kernel boot it with OVMF"
+	@echo "    make uefi64-native  build the ExitBootServices native mode"
+	@echo "    make run-uefi64-native boot native mode under OVMF"
 	@echo "    make kernel-c      emit only the Lepton-generated C"
 	@echo "    make kernel-bin    also produce a flat .bin"
 	@echo "    make iso           build a GRUB-bootable lepton.iso"
