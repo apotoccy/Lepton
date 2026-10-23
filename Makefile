@@ -65,6 +65,8 @@ KERNEL_C      := $(KERNEL_OUT)/kernel.c
 KERNEL_ELF    := $(KERNEL_OUT)/kernel.elf
 KERNEL_BIN    := $(KERNEL_OUT)/kernel.bin
 KERNEL_ISO    := $(KERNEL_OUT)/lepton.iso
+S9_ISO        := $(KERNEL_OUT)/lepton-s9.iso
+S9_MODEL      ?= models/smollm2-instruct-q4_0.gguf
 HYBRID_ISO    := $(KERNEL_OUT)/lepton-hybrid.iso
 HYBRID_DIR    := $(KERNEL_OUT)/hybrid
 
@@ -82,7 +84,7 @@ HAVE_M32 := $(shell printf 'int main(void){return 0;}\n' > /tmp/.lp_m32.c; \
         kernel kernel32 kernel64-check uefi64 uefi64-esp run-uefi64 \
         uefi64-shell run-uefi64-shell uefi64-kernel run-uefi64-kernel \
         uefi64-native run-uefi64-native \
-        iso-hybrid run-iso-hybrid run-iso-hybrid-uefi \
+        iso-hybrid run-iso-hybrid run-iso-hybrid-uefi iso-s9 run-iso-s9 \
         kernel-c kernel-bin iso run-kernel \
         clean clean-kernel check-m32 help
 
@@ -383,6 +385,24 @@ $(KERNEL_ISO): $(KERNEL_ELF) $(MODEL)
 
 iso: check-m32 $(KERNEL_ISO)
 
+$(S9_ISO): check-m32 $(KERNEL_ELF) $(S9_MODEL)
+	@mkdir -p $(KERNEL_OUT)/s9/boot/grub
+	cp $(KERNEL_ELF) $(KERNEL_OUT)/s9/boot/kernel.elf
+	cp $(S9_MODEL) $(KERNEL_OUT)/s9/boot/model.gguf
+	printf 'set timeout=0\nset default=0\nmenuentry "Lepton OS" {\n' \
+	    > $(KERNEL_OUT)/s9/boot/grub/grub.cfg
+	printf '  multiboot /boot/kernel.elf\n' \
+	    >> $(KERNEL_OUT)/s9/boot/grub/grub.cfg
+	printf '  module /boot/model.gguf\n  boot\n}\n' \
+	    >> $(KERNEL_OUT)/s9/boot/grub/grub.cfg
+	grub-mkrescue -o $@ $(KERNEL_OUT)/s9
+	@echo "s9 iso: $@"
+
+iso-s9: check-m32 $(S9_ISO)
+
+run-iso-s9: check-m32 $(S9_ISO)
+	$(QEMU) -cdrom $(S9_ISO) -serial stdio -display none -no-reboot -boot d
+
 $(HYBRID_ISO): check-m32 $(KERNEL_ELF) $(UEFI64_KERNEL) $(UEFI_MODEL) $(KERNEL_BOOT)
 	@rm -rf $(HYBRID_DIR)
 	@mkdir -p $(HYBRID_DIR)/boot/grub $(HYBRID_DIR)/models $(HYBRID_DIR)/efi/EFI/BOOT $(HYBRID_DIR)/efi/models
@@ -425,6 +445,24 @@ run-kernel: check-m32 $(KERNEL_ELF) $(KERNEL_TEST_MODULE)
 	    -serial mon:stdio -display none -no-reboot
 
 run-iso: check-m32 $(KERNEL_ISO)
+
+$(S9_ISO): check-m32 $(KERNEL_ELF) $(S9_MODEL)
+	@mkdir -p $(KERNEL_OUT)/s9/boot/grub
+	cp $(KERNEL_ELF) $(KERNEL_OUT)/s9/boot/kernel.elf
+	cp $(S9_MODEL) $(KERNEL_OUT)/s9/boot/model.gguf
+	printf 'set timeout=0\nset default=0\nmenuentry "Lepton OS" {\n' \
+	    > $(KERNEL_OUT)/s9/boot/grub/grub.cfg
+	printf '  multiboot /boot/kernel.elf\n' \
+	    >> $(KERNEL_OUT)/s9/boot/grub/grub.cfg
+	printf '  module /boot/model.gguf\n  boot\n}\n' \
+	    >> $(KERNEL_OUT)/s9/boot/grub/grub.cfg
+	grub-mkrescue -o $@ $(KERNEL_OUT)/s9
+	@echo "s9 iso: $@"
+
+iso-s9: check-m32 $(S9_ISO)
+
+run-iso-s9: check-m32 $(S9_ISO)
+	$(QEMU) -cdrom $(S9_ISO) -serial stdio -display none -no-reboot -boot d
 
 
 # ---------------------------------------------------------------------------
@@ -513,6 +551,7 @@ help:
 	@echo "    make kernel-bin    also produce a flat .bin"
 	@echo "    make iso           build a GRUB-bootable lepton.iso"
 	@echo "    make iso-hybrid    build BIOS32 + UEFI64 hybrid ISO"
+	@echo "    make iso-s9        BIOS-only USB ISO with SmolLM2 model"
 	@echo "    make run-iso-hybrid / run-iso-hybrid-uefi"
 	@echo "    make run-kernel    boot the ELF in QEMU (serial on stdout)"
 	@echo "    make run-iso       boot the ISO in QEMU"

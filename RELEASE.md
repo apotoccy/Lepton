@@ -72,6 +72,8 @@ The model is duplicated because BIOS Multiboot and UEFI file access use
 different filesystems. A hybrid MBR/GPT table allows USB writers and UEFI
 boot; BIOS USB still needs the BIOS-only/CD path.
 
+For the S9, use `make iso-s9` and write `build/kernel/lepton-s9.iso`.
+
 ## Known limitations
 
 - UEFI64 uses Boot Services; native 64-bit mode is not implemented.

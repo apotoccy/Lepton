@@ -28,6 +28,8 @@ kernel/arch/uefi64/        UEFI64 platform and boot
 | `make iso-hybrid` | Release image | BIOS32 + UEFI64 hybrid ISO |
 | `make run-iso-hybrid` | Release image | Boots the BIOS hybrid under QEMU |
 | `make run-iso-hybrid-uefi` | Release image | Boots the UEFI hybrid under OVMF |
+| `make iso-s9` | S9 release image | BIOS-only USB-bootable ISO with SmolLM2 |
+| `make run-iso-s9` | S9 release image | Boots the S9 ISO under QEMU |
 | `make iso` | Stable | BIOS GRUB ISO |
 
 `kernel64-check` is a compile check; the bootable target is `uefi64-kernel`.
@@ -103,8 +105,17 @@ BIOS module and UEFI file APIs read different filesystems. The image is about
 
 The hybrid MBR makes the image acceptable to USB writers such as Etcher and
 bootable through the UEFI ESP. BIOS USB boot still lands in the GRUB rescue
-prompt because the custom El Torito MBR is not a full GRUB core image; use the
-BIOS-only `make iso` image or boot the hybrid via CD for the S9.
+prompt because the custom El Torito MBR is not a full GRUB core image.
+
+For the S9, use the dedicated BIOS-only image:
+
+```bash
+make iso-s9
+# write build/kernel/lepton-s9.iso to USB
+```
+
+This uses `grub-mkrescue`'s complete BIOS hybrid MBR and includes SmolLM2
+Q4_0. It reached the Lepton kernel in QEMU/SeaBIOS raw-disk boot.
 
 ## Platform contract
 

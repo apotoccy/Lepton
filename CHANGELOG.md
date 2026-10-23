@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add `iso-s9`, a BIOS-only USB-bootable image with SmolLM2 for the S9.
+  The hybrid image's BIOS USB MBR is incomplete; the S9 uses this image while
+  the hybrid remains the UEFI/Ryzen image.
+
 - Add a hybrid MBR/GPT table to `lepton-hybrid.iso` so Etcher/USB writers
   accept it and UEFI can boot from the FAT ESP. BIOS USB still requires the
   BIOS-only or CD path.

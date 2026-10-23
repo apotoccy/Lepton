@@ -45,7 +45,8 @@ make uefi64-shell    # GOP/ConIn UEFI64 platform shell
 make run-uefi64-shell # boot the shell under OVMF
 make uefi64-kernel   # 64-bit Lepton core
 make run-uefi64-kernel # boot it with SmolLM2 Q4_0 from the ESP
-make iso-hybrid        # BIOS32 + UEFI64 hybrid ISO
+make iso-s9            # BIOS-only USB ISO for the S9 (SmolLM2)
+make iso-hybrid        # BIOS32 + UEFI64 hybrid ISO for UEFI/Ryzen
 make uefi64-native     # optional ExitBootServices native mode
 make run-uefi64-native # native mode under OVMF (serial input)
 ```
